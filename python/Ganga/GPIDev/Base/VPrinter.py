@@ -6,32 +6,27 @@ from __future__ import absolute_import
 # $Id: VPrinter.py,v 1.1 2008-07-17 16:40:52 moscicki Exp $
 ##########################################################################
 from Ganga.GPIDev.Base.Proxy import isProxy, isType, runProxyMethod, stripProxy
+from Ganga.GPIDev.Base.Objects import GangaObject
 
 from inspect import isclass
+from cStringIO import StringIO
 
-def quoteValue(value, selection, indent=''):
+def quoteValue(value, interactive=False):
     """A quoting function. Used to get consistent formatting"""
-    # print "Quoting",repr(value),selection
-    if isType(value, type('')):
-        if selection == 'copyable':
-
-            value = value.replace('"', R'\"')
-            value = value.replace("'", R"\'")
-
-# DISABLED
-##             valueList = list( value )
-# for i in range( len( value ) ):
-##                 c = value[ i ]
-# if c in [ "'", '"' ]:
-##                     valueList[ i ] = "\\" + c
-##                     value = "".join( valueList )
-            if 1 + value.find("\n"):
-                # print 'Quote result',"'''" + value + "'''"
-                return "'''" + value + "'''"
-        # print 'Quote result',"'"+value+"'"
-        return indent + "'" + value + "'"
-    # print 'Quote result',value
-    return value
+    if isType(value, str):
+        # If it's a string then use `repr` for the quoting
+        if interactive is True:
+            return str(value)
+        else:
+            return repr(value)
+    try:
+        # If it's an iterable like a list or a GangaList then quote each element
+        quoted_list = [quoteValue(s, interactive) for s in value]
+        string_of_list = '[' + ', '.join(quoted_list) + ']'
+        return string_of_list
+    except TypeError:
+        # If it's not a string or iterable then just return it plain
+        return value
 
 
 def indent(level):
@@ -49,7 +44,7 @@ class VPrinter(object):
     #            'copyable'       - print only copyable properties
     #            any other string - print unhidden properties
 
-    def __init__(self, out=None, selection=''):
+    def __init__(self, out=None, selection='', interactive=False):
         self.level = 0
         self.nocomma = 1
         self.selection = selection
@@ -62,6 +57,7 @@ class VPrinter(object):
         # detect whether the body is empty to handle the comma correctly in
         # this case too
         self.empty_body = 0
+        self._interactive = interactive
 
     def indent(self):
         return indent(self.level)
@@ -129,7 +125,10 @@ class VPrinter(object):
             # else:
             #    print 'no transformation'
             if isclass(value):
-                print(self.indent(), name, '=', repr(value), end = '', file=self.out)
+                if self._interactive is True:
+                    print(self.indent(), name, '=', str(value), end = '', file=self.out)
+                else:
+                    print(self.indent(), name, '=', repr(value), end = '', file=self.out)
             else:
                 print(self.indent(), name, '=', self.quote(value), end='', file=self.out)
 
@@ -165,18 +164,19 @@ class VPrinter(object):
             #self.level-=1
 
     def quote(self, x):
-        return quoteValue(x, self.selection, '   ')
+        return quoteValue(x, self._interactive)
 
 
 class VSummaryPrinter(VPrinter):
 
     """A class for printing summeries of object properties in a customisable way."""
 
-    def __init__(self, level, verbosity_level, whitespace_marker, out=None, selection=''):
+    def __init__(self, level, verbosity_level, whitespace_marker, out=None, selection='', interactive=False):
         super(VSummaryPrinter, self).__init__(out, selection)
         self.level = level
         self.verbosity_level = verbosity_level
         self.whitespace_marker = whitespace_marker
+        self._interactive = interactive
 
     def _CallSummaryPrintMember(self, node, name, value):
         """Checks to see whether there is a summary_print function pointer
@@ -189,7 +189,7 @@ class VSummaryPrinter(VPrinter):
         print_summary = node._schema.getItem(name)['summary_print']
         if print_summary is not None:
             fp = getattr(node, print_summary)
-            str_val = fp(value, self.verbosity_level)
+            str_val = fp(value, self.verbosity_level, self._interactive)
             self.empty_body = 0
             self.comma()
             print(self.indent(), name, '=', self.quote(str_val), end=' ', file=self.out)
@@ -197,9 +197,11 @@ class VSummaryPrinter(VPrinter):
         return function_pointer_available
 
     def _CallPrintSummaryTree(self, obj):
-        import cStringIO
-        sio = cStringIO.StringIO()
-        runProxyMethod(obj, 'printSummaryTree', self.level, self.verbosity_level, self.indent(), sio, self.selection)
+        sio = StringIO()
+        if not hasattr(stripProxy(obj), 'printSummaryTree'):
+            print("%s" % str(obj), file=self.out)
+        else:
+            runProxyMethod(obj, 'printSummaryTree', self.level, self.verbosity_level, self.indent(), sio, self.selection, self._interactive)
         result = sio.getvalue()
         if result.endswith('\n'):
             result = result[0:-1]
@@ -245,7 +247,6 @@ class VSummaryPrinter(VPrinter):
             return
         if self._CallSummaryPrintMember(node, name, subnode):
             return
-        from Ganga.GPIDev.Base.Objects import GangaObject
         if isType(subnode, GangaObject):
             self.empty_body = 0
             self.comma()
@@ -257,7 +258,7 @@ class VSummaryPrinter(VPrinter):
         super(VSummaryPrinter, self).componentAttribute(node, name, subnode, sequence)
 
 
-def full_print(obj, out=None):
+def full_print(obj, out=None, interactive=False):
     """Print the full contents of a GPI object without abbreviation."""
     import sys
     if out == None:
@@ -265,21 +266,19 @@ def full_print(obj, out=None):
 
     from Ganga.GPIDev.Lib.GangaList import GangaList
 
-    obj = stripProxy(obj)
+    _obj = stripProxy(obj)
 
-    if isType(obj, GangaList.GangaList):
-        obj_len = len(obj)
+    if isType(_obj, GangaList.GangaList):
+        obj_len = len(_obj)
         if obj_len == 0:
             print('[]', end=' ', file=out)
         else:
-            import cStringIO
-            from Ganga.GPIDev.Base.Objects import GangaObject
             outString = '['
             count = 0
             for x in obj:
                 if isType(x, GangaObject):
-                    sio = cStringIO.StringIO()
-                    x.printTree(sio)
+                    sio = StringIO()
+                    stripProxy(x).printTree(sio, interactive)
                     result = sio.getvalue()
                     # remove trailing whitespace and newlines
                     outString += result.rstrip()
@@ -294,35 +293,34 @@ def full_print(obj, out=None):
             print(outString, end=' ', file=out)
         return
 
-    if isProxy(obj):
-        import cStringIO
-        sio = cStringIO.StringIO()
-        runProxyMethod(obj, 'printTree', sio)
+    if isProxy(obj) and isType(_obj, GangaObject):
+        sio = StringIO()
+        runProxyMethod(obj, 'printTree', sio, interactive)
         print(sio.getvalue(), end=' ', file=out)
     else:
-        print(str(obj), end=' ', file=out)
+        print(str(_obj), end=' ', file=out)
 
 
-def summary_print(obj, out=None):
+def summary_print(obj, out=None, interactive=False):
     """Print the summary contents of a GPI object with abbreviation."""
     import sys
     if out == None:
         out = sys.stdout
 
+    _obj = stripProxy(obj)
+
     from Ganga.GPIDev.Lib.GangaList.GangaList import GangaList
-    if isType(obj, GangaList):
-        obj_len = len(obj)
+    if isType(_obj, GangaList):
+        obj_len = len(_obj)
         if obj_len == 0:
             print('[]', end=' ', file=out)
         else:
-            import cStringIO
-            from Ganga.GPIDev.Base.Objects import GangaObject
             outString = '['
             count = 0
-            for x in obj:
+            for x in _obj:
                 if isType(x, GangaObject):
-                    sio = cStringIO.StringIO()
-                    x.printSummaryTree(0, 0, '', out=sio)
+                    sio = StringIO()
+                    stripProxy(x).printSummaryTree(0, 0, '', out=sio)
                     result = sio.getvalue()
                     # remove trailing whitespace and newlines
                     outString += result.rstrip()
@@ -337,10 +335,10 @@ def summary_print(obj, out=None):
             print(outString, end=' ', file=out)
         return
 
-    if isProxy(obj):
-        import cStringIO
-        sio = cStringIO.StringIO()
-        runProxyMethod(obj, 'printSummaryTree', 0, 0, '', sio)
+    if isProxy(obj) and isType(_obj, GangaObject):
+        sio = StringIO()
+        runProxyMethod(obj, 'printSummaryTree', 0, 0, '', sio, interactive)
         print(sio.getvalue(), end=' ', file=out)
     else:
-        print(str(obj), end=' ', file=out)
+        print(str(_obj), end=' ', file=out)
+

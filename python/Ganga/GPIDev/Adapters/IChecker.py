@@ -5,6 +5,7 @@
 ##########################################################################
 from Ganga.GPIDev.Adapters.IPostProcessor import PostProcessException, IPostProcessor
 from Ganga.GPIDev.Schema import Schema, Version, SimpleItem
+from Ganga.GPIDev.Base.Proxy import getName
 import os
 import glob
 
@@ -41,7 +42,7 @@ class IChecker(IPostProcessor):
                     with open(os.path.join(job.getDebugWorkspace().getPath(), 'checker_errors.txt'), 'a') as debug_file:
                         debug_file.write('\n Checker has failed with the following error: \n')
                         debug_file.write(str(e))
-                    logger.error(str(e))
+                    logger.error("%s" % e)
                     return True
         else:
             return True
@@ -72,7 +73,7 @@ class IFileChecker(IChecker):
 
         if not len(self.files):
             raise PostProcessException(
-                'No files specified, %s will do nothing!' % self._name)
+                'No files specified, %s will do nothing!' % getName(self))
 
         filepaths = []
         for f in self.files:

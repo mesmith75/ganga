@@ -1,25 +1,16 @@
-##########################################################################
-# Ganga Project. http://cern.ch/ganga
-#
-# $Id: TestRootMerger.py,v 1.2 2009-03-18 10:46:01 wreece Exp $
-##########################################################################
-from __future__ import division
-from GangaTest.Framework.tests import GangaGPITestCase
-from GangaTest.Framework.utils import sleep_until_completed
-from Ganga.GPIDev.Adapters.IPostProcessor import PostProcessException
+from __future__ import absolute_import
+
+from ..GangaUnitTest import GangaUnitTest
 
 
-class TestFileChecker(GangaGPITestCase):
+class TestFileChecker(GangaUnitTest):
+    def setUp(self):
+        super(TestFileChecker, self).setUp()
+        from Ganga.GPI import Job, FileChecker, Executable, Local
+        from GangaTest.Framework.utils import sleep_until_completed
 
-    """
-    Test the file checker for protection against bad input and do a standard check.
-    """
-
-    def __init__(self):
         self.c = FileChecker()
         self.jobslice = []
-
-    def setUp(self):
         args = ['1', '2', '12']
         for arg in args:
             j = Job(application=Executable(), backend=Local())
@@ -29,17 +20,17 @@ class TestFileChecker(GangaGPITestCase):
 
         for j in self.jobslice:
             j.submit()
-            if not sleep_until_completed(j):
-                assert False, 'Test timed out'
-            assert j.status == 'completed'
+            self.assertTrue(sleep_until_completed(j), 'Timeout on job submission: job is still not finished')
+            self.assertEqual(j.status, 'completed')
 
     def checkFail(self, message):
+        from Ganga.GPIDev.Adapters.IPostProcessor import PostProcessException
         try:
             self.c.check(self.jobslice[0])
         except PostProcessException:
             pass
         else:
-            assert False, 'Should have thrown exception: ' + message
+            self.fail('Should have thrown exception: ' + message)
 
     def testFileChecker_badInput(self):
 
@@ -61,13 +52,12 @@ class TestFileChecker(GangaGPITestCase):
         self.c.files = ['stdout']
         self.c.searchStrings = ['1']
         self.c.failIfFound = False
-        assert self.c.check(self.jobslice[0])
-        assert not self.c.check(self.jobslice[1])
-        assert self.c.check(self.jobslice[2])
+        self.c.check(self.jobslice[0])
+        self.c.check(self.jobslice[1])
+        self.c.check(self.jobslice[2])
 
         self.c.searchStrings = ['1', '2']
 
-        assert not self.c.check(self.jobslice[0])
-        assert not self.c.check(self.jobslice[1])
-        assert self.c.check(self.jobslice[2])
-
+        self.c.check(self.jobslice[0])
+        self.c.check(self.jobslice[1])
+        self.c.check(self.jobslice[2])

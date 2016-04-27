@@ -1,8 +1,7 @@
 from __future__ import absolute_import
 from Ganga.GPIDev.Schema import Schema, Version, SimpleItem, ComponentItem
 from fnmatch import fnmatch
-from .IGangaFile import IGangaFile
-import logging
+from Ganga.GPIDev.Adapters.IGangaFile import IGangaFile
 from Ganga.Utility.logging import getLogger
 from Ganga.GPIDev.Base.Proxy import isType, GPIProxyObjectFactory
 from Ganga.Utility.Config import getConfig
@@ -12,13 +11,13 @@ import glob
 import os
 import pickle
 import stat
+import logging
 import Ganga.Utility.Config
 
 logger = getLogger()
 regex = re.compile('[*?\[\]]')
-badlogger = logging.getLogger('oauth2client.util')
+badlogger = getLogger('oauth2client.util')
 badlogger.setLevel(logging.ERROR)
-
 
 class GoogleFile(IGangaFile):
 
@@ -48,11 +47,10 @@ class GoogleFile(IGangaFile):
                       'localDir': SimpleItem(defvalue="", copyable=1,
                                              doc='local dir where the file is stored, used from get and put methods'),
                       'subfiles': ComponentItem(category='gangafiles', defvalue=[], hidden=1,
-                                                typelist=['Ganga.GPIDev.Lib.File.LCGSEFile'], sequence=1, copyable=0,
-                                                doc="collected files from the wildcard namePattern"),
+                                                sequence=1, copyable=0, doc="collected files from the wildcard namePattern"),
                       'failureReason': SimpleItem(defvalue="", copyable=1,
                                                   doc='reason for the upload failure'),
-                      'compressed': SimpleItem(defvalue=False, typelist=['bool'], protected=0,
+                      'compressed': SimpleItem(defvalue=False, typelist=[bool], protected=0,
                                                doc='wheather the output file should be compressed before sending somewhere'),
                       'downloadURL': SimpleItem(defvalue="", copyable=1, protected=1,
                                                 doc='download URL assigned to the file upon upload to GoogleDrive'),
@@ -79,9 +77,10 @@ class GoogleFile(IGangaFile):
             from oauth2client.client import OAuth2WebServerFlow
 
             # Copy your credentials from the APIs Console
-            CLIENT_ID = "54459939297.apps.googleusercontent.com"
-            CLIENT_SECRET = "mAToHx5RpXtwkeYR6nOIe_Yw"
-
+#            CLIENT_ID = "54459939297.apps.googleusercontent.com"
+#            CLIENT_SECRET = "mAToHx5RpXtwkeYR6nOIe_Yw"
+            CLIENT_ID = '776655306197-dirtoquqsm7cpqgepvamofg5t2b5f637.apps.googleusercontent.com'
+            CLIENT_SECRET = 'GpdEP-OBZZQLB3k-xxOpzFQG'
             # Check https://developers.google.com/drive/scopes for all
             # available scopes
             OAUTH_SCOPE = 'https://www.googleapis.com/auth/drive.file'
@@ -163,6 +162,7 @@ class GoogleFile(IGangaFile):
 
     def _on_attribute__set__(self, obj_type, attrib_name):
         r = copy.deepcopy(self)
+        from Ganga.GPIDev.Lib.Job import Job
         if isinstance(obj_type, Job) and attrib_name == 'outputfiles':
             r.localDir = None
             r.failureReason = ''
@@ -421,6 +421,8 @@ class GoogleFile(IGangaFile):
 
             example use: GoogleFile().restore()
         """
+        from apiclient import errors
+
         service = self._setup_service()
 
         # Wildcard procedure
@@ -450,6 +452,7 @@ class GoogleFile(IGangaFile):
         """
         Creates a Ganga folder on GoogleDrive if one is not already present
         """
+        from apiclient import errors
         service = self._setup_service()
 
         page_token = None

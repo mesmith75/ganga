@@ -4,7 +4,7 @@ import tempfile
 import copy
 
 from Ganga.Utility.Config import getConfig
-from Ganga.GPIDev.Lib.File import FileUtils
+from Ganga.GPIDev.Lib.GangaList.GangaList import GangaList
 
 from Ganga.GPIDev.Base.Proxy import isType, stripProxy, getName
 
@@ -157,6 +157,7 @@ def getWNCodeForOutputSandbox(job, files, jobid):
     insertScript = """\n
 from Ganga.Utility.files import recursive_copy
 import glob
+import os
 
 f_to_copy = ###FILES###
 
@@ -181,6 +182,8 @@ for f in f_to_copy:
 
 for fn in final_list_to_copy:
     try:
+        if not os.path.exists(sharedoutputpath):
+            os.makedirs(sharedoutputpath)
         recursive_copy(fn,sharedoutputpath)
     except Exception as x:
         print('ERROR: (job'+###JOBID###+')',x)
@@ -218,11 +221,12 @@ def getWNCodeForDownloadingInputFiles(job, indent):
                 # special case for LocalFile
                 if getName(job.backend) in ['Localhost', 'Batch', 'LSF', 'Condor', 'PBS']:
                     # create symlink
-                    shortScript += """
+                    shortScript = """
 # create symbolic links for LocalFiles
 for f in ###FILELIST###:
    os.symlink(f, os.path.basename(f)) 
 """
+                    from Ganga.GPIDev.Lib.File import FileUtils
                     shortScript = FileUtils.indentScript(shortScript, '###INDENT####')
 
                     insertScript += shortScript
@@ -290,6 +294,7 @@ for patternToZip in ###PATTERNSTOZIP###:
 postprocesslocations = file(os.path.join(os.getcwd(), '###POSTPROCESSLOCATIONSFILENAME###'), 'w')  
 """
 
+    from Ganga.GPIDev.Lib.File import FileUtils
     shortScript = FileUtils.indentScript(shortScript, '###INDENT###')
 
     insertScript = shortScript

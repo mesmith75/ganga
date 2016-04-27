@@ -13,7 +13,8 @@ from Ganga.GPIDev.Base.Proxy import GPIProxyObjectFactory
 logger = Ganga.Utility.logging.getLogger()
 from Ganga.Utility.GridShell import getShell
 
-from .IGangaFile import IGangaFile
+from Ganga.GPIDev.Adapters.IGangaFile import IGangaFile
+from Ganga.GPIDev.Base.Proxy import getName
 
 from Ganga.GPIDev.Credentials2 import require_credential, VomsProxy
 
@@ -26,7 +27,6 @@ regex = re.compile('[*?\[\]]')
 
 def getLCGConfig():
     return getConfig('Output')['LCGSEFile']['uploadOptions']
-
 
 class LCGSEFile(IGangaFile):
 
@@ -44,10 +44,10 @@ class LCGSEFile(IGangaFile):
         'srm_token': SimpleItem(defvalue='', copyable=1, doc='the SRM space token, meaningful only when se_type is set to srmv2'),
         'SURL': SimpleItem(defvalue='', copyable=1, doc='the LCG SE SURL'),
         'port': SimpleItem(defvalue='', copyable=1, doc='the LCG SE port'),
-        'locations': SimpleItem(defvalue=[], copyable=1, typelist=['str'], sequence=1, doc="list of locations where the outputfiles were uploaded"),
-        'subfiles': ComponentItem(category='gangafiles', defvalue=[], hidden=1, typelist=['Ganga.GPIDev.Lib.File.LCGSEFile'], sequence=1, copyable=0, doc="collected files from the wildcard namePattern"),
+        'locations': SimpleItem(defvalue=[], copyable=1, typelist=[str], sequence=1, doc="list of locations where the outputfiles were uploaded"),
+        'subfiles': ComponentItem(category='gangafiles', defvalue=[], hidden=1, sequence=1, copyable=0, doc="collected files from the wildcard namePattern"),
         'failureReason': SimpleItem(defvalue="", protected=1, copyable=0, doc='reason for the upload failure'),
-        'compressed': SimpleItem(defvalue=False, typelist=['bool'], protected=0, doc='wheather the output file should be compressed before sending somewhere'),
+        'compressed': SimpleItem(defvalue=False, typelist=[bool], protected=0, doc='wheather the output file should be compressed before sending somewhere'),
         'credential_requirements': ComponentItem('CredentialRequirement', defvalue='VomsProxy'),
     })
     _category = 'gangafiles'
@@ -75,12 +75,12 @@ class LCGSEFile(IGangaFile):
         elif len(args) == 2 and isinstance(args[0], str) and isinstance(args[1], str):
             self.namePattern = args[0]
             self.localDir = args[1]
-        self.shell = GridShell.getShell()
+        self.shell = getShell()
         self.locations = []
 
     def _on_attribute__set__(self, obj_type, attrib_name):
         r = copy.deepcopy(self)
-        if obj_type.__class__.__name__ == 'Job' and attrib_name == 'outputfiles':
+        if getName(obj_type) == 'Job' and attrib_name == 'outputfiles':
             r.locations = []
             r.localDir = ''
             r.failureReason = ''

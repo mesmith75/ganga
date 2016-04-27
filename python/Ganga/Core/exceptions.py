@@ -21,17 +21,14 @@ class GangaException(Exception):
         # This code will give a stack trace from a GangaException only when debugging is enabled
         # This makes debugging what's going on much easier whilst hiding mess
         # from users
-        if self.logger is None:
-            import Ganga.Utility.logging
-            self.logger = Ganga.Utility.logging.getLogger()
-        try:
-            import logging
-        except ImportError:
-            import Ganga.Utility.external.logging as logging
+        #if self.logger is None:
+        #    from Ganga.Utility.logging import getLogger
+        #    self.logger = getLogger()
 
-        if self.logger.isEnabledFor(logging.DEBUG):
-            import traceback
-            traceback.print_stack()
+        #import logging
+        #if self.logger.isEnabledFor(logging.DEBUG):
+        #    import traceback
+        #    traceback.print_stack()
 
     def __str__(self):
         """
@@ -150,17 +147,14 @@ class GangaAttributeError(AttributeError, GangaException):
         # This code will give a stack trace from a GangaException only when debugging is enabled
         # This makes debugging what's going on much easier whilst hiding mess
         # from users
-        if self.logger is None:
-            import Ganga.Utility.logging
-            self.logger = Ganga.Utility.logging.getLogger()
-            try:
-                import logging
-            except ImportError:
-                import Ganga.Utility.external.logging as logging
+        #if self.logger is None:
+        #    from Ganga.Utility.logging import getLogger
+        #    self.logger = Ganga.Utility.logging.getLogger()
 
-            if self.logger.isEnabledFor(logging.DEBUG):
-                import traceback
-                traceback.print_stack()
+        #    import logging
+        #    if self.logger.isEnabledFor(logging.DEBUG):
+        #        import traceback
+        #        traceback.print_stack()
 
 
 class GangaValueError(ValueError, GangaException):
@@ -172,6 +166,17 @@ class GangaValueError(ValueError, GangaException):
 
 class GangaIOError(IOError, GangaException):
     pass
+
+
+class SplitterError(GangaException):
+    """Splitting errors."""
+
+    def __init__(self, message=''):
+        GangaException.__init__(self, message)
+        self.message = message
+
+    def __str__(self):
+        return "SplitterError: %s " % self.message
 
 
 class ProtectedAttributeError(GangaAttributeError):

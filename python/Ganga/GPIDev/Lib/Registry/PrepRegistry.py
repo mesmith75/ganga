@@ -6,7 +6,7 @@ import threading
 from Ganga.Core.GangaRepository.Registry import Registry
 from Ganga.GPIDev.Base import GangaObject
 from Ganga.GPIDev.Schema import Schema, SimpleItem, Version
-from Ganga.GPIDev.Base.Proxy import stripProxy
+from Ganga.GPIDev.Base.Proxy import stripProxy, getName
 import Ganga.Utility.Config
 from Ganga.GPIDev.Lib.File import getSharedPath
 logger = Ganga.Utility.logging.getLogger()
@@ -26,12 +26,16 @@ class PrepRegistry(Registry):
     def startup(self):
         self._needs_metadata = True
         super(PrepRegistry, self).startup()
+        this_ShareRef = ShareRef()
         if len(self.metadata.ids()) == 0:
-            self.metadata._add(ShareRef())
+            self.metadata._add(this_ShareRef)
         self.shareref = self.metadata[self.metadata.ids()[-1]]
 
     def getShareRef(self):
         return self.shareref
+
+    def getSlice(self):
+        pass
 
     def getProxy(self):
         pass
@@ -44,7 +48,9 @@ class PrepRegistry(Registry):
         ## Aparently this shuts down the metadata repo before we want to shut it down...
         #super(PrepRegistry, self).shutdown()
         logger = getLogger()
-        self.shareref = self.metadata[self.metadata.ids()[-1]]
+        #logger.info("Geting id: %s" %  self.metadata.ids()[-1])
+        self.shareref = self.metadata._objects[self.metadata.ids()[-1]]
+        #logger.info("ShareRef: %s" % getName(self.shareref))
         self._lock.acquire()
         ## THIS IS DISABLED AS IT REQUIRES ACCESS TO REPO OBJECTS THROUGH GETREADACCES...
         ## THIS NEEDS TO BE FIXED OR IMPLEMENTED AS A SHUTDOWN SERVICE!!!
@@ -52,15 +58,17 @@ class PrepRegistry(Registry):
             stripProxy(self.shareref).closedown()  ## Commenting out a potentially EXTREMELY heavy operation from shutdown after ganga dev meeting - rcurrie
         except Exception as err:
             logger.error("Shutdown Error in ShareRef")
-            logger.error("Err: %s" % str(err))
+            logger.error("Err: %s" % err)
 
         try:
             self._safe_shutdown()
         except Exception as err:
-            logger.debug("Shutdown Error: %s" % str(err))
+            logger.debug("Shutdown Error: %s" % err)
         finally:
             self._hasStarted = False
             self._lock.release()
+
+        self.metadata = None
 
     def _safe_shutdown(self):
         try:
@@ -69,7 +77,7 @@ class PrepRegistry(Registry):
         except Exception as x:
             logger.error("Exception on shutting down metadata repository '%s' registry: %s", self.name, x)
         try:
-            self._flush()
+            self.flush_all()
         except Exception as x:
             logger.error("Exception on flushing '%s' registry: %s", self.name, x)
         #self._hasStarted = False
@@ -99,31 +107,13 @@ class ShareRef(GangaObject):
     def __init__(self):
         super(ShareRef, self).__init__()
         self.name = {}
-        self._setRegistry(None)
+        #self._setRegistry(None)
 
-    def __construct__(self):
-        super(ShareRef, self).__construct__()
+    def __construct__(self, args):
+        super(ShareRef, self).__construct__(args)
         if self.name is None:
             self.name = {}
-        self._setRegistry(None)
-
-    def __getstate__(self):
-        this_dict = super(ShareRef, self).__getstate__()
-        this_dict['_registry'] = None
-        this_dict['_counter'] = 0
-        return this_dict
-
-    def __setstate__(self, this_dict):
-        #self._getWriteAccess()
-        try:
-            super(ShareRef, self).__setstate__(this_dict)
-            self._setRegistry(None)
-            self._setDirty()
-        except Exception as err:
-            logger.debug("setstate Error: %s" % str(err))
-        finally:
-            #self._releaseWriteAccess()
-            self._setDirty()
+        #self._setRegistry(None)
 
     def __getName(self):
         if not hasattr(self, 'name') or self.name is None:
@@ -139,6 +129,7 @@ class ShareRef(GangaObject):
         """
         logger.debug("running increase() in prepregistry")
         self._getWriteAccess()
+
 
         from Ganga.GPIDev.Lib.File import getSharedPath
         shareddir = os.path.join(getSharedPath(), os.path.basename(shareddir))
@@ -159,7 +150,7 @@ class ShareRef(GangaObject):
             logger.error('Directory %s does not exist' % shareddir)
 
         self._setDirty()
-        #self._releaseWriteAccess()
+        self._releaseWriteAccess()
 
     def decrease(self, shareddir, remove=0):
         """Reduce the reference counter for a given shared directory by 1. If the current value
@@ -182,11 +173,11 @@ class ShareRef(GangaObject):
         # if we try to decrease a shareref that doesn't exist, we just set the
         # corresponding shareref to 0
         except KeyError as err:
-            logger.debug("KeyError: %s" % str(err))
+            logger.debug("KeyError: %s" % err)
             self.__getName()[basedir] = 0
 
         self._setDirty()
-        #self._releaseWriteAccess()
+        self._releaseWriteAccess()
 
     def lookup(self, sharedir, unprepare=False):
         """
@@ -194,13 +185,13 @@ class ShareRef(GangaObject):
         The optional parameter 'unprepare=True' can be set to call the unprepare method 
         on the returned objects.
         """
-        from Ganga.GPI import jobs, box, tasks
+        from Ganga.Core.GangaRepository import getRegistryProxy
         objectlist = []
-        for thing in jobs.select():
+        for thing in getRegistryProxy('jobs').select():
             objectlist.append({thing: 'job'})
-        for thing in box.select():
+        for thing in getRegistryProxy('box').select():
             objectlist.append({thing: 'box'})
-        for thing in tasks.select():
+        for thing in getRegistryProxy('tasks').select():
             objectlist.append({thing: 'task'})
 
         run_unp = None
@@ -214,7 +205,7 @@ class ShareRef(GangaObject):
                     master_index += 1
 
             except AttributeError as err:
-                logger.debug("Err: %s" % str(err))
+                logger.debug("Err: %s" % err)
                 try:
                     item.keys()[0].application.is_prepared.name
                     if item.keys()[0].application.is_prepared.name == sharedir:
@@ -222,7 +213,7 @@ class ShareRef(GangaObject):
                         run_unp = item.keys()[0].application
                         master_index += 1
                 except AttributeError as err2:
-                    logger.debug("Err2: %s" % str(err2))
+                    logger.debug("Err2: %s" % err2)
                     try:
                         item.keys()[0].analysis.application.is_prepared.name
                         if item.keys()[0].analysis.application.is_prepared.name == sharedir:
@@ -230,7 +221,7 @@ class ShareRef(GangaObject):
                             run_unp = item.keys()[0].analysis.application
                             master_index += 1
                     except AttributeError as err3:
-                        logger.debug("Err3: %s" % str(err3))
+                        logger.debug("Err3: %s" % err3)
                         pass
 
             if run_unp is not None and unprepare is True:
@@ -256,7 +247,7 @@ class ShareRef(GangaObject):
         try:
             stripProxy(this_object).is_prepared.name = os.path.basename(this_object.is_prepared.name)
         except Exception as err:
-            logger.debug("rebuild Error: %s" % str(err))
+            logger.debug("rebuild Error: %s" % err)
             Ganga.Utility.logging.log_unknown_exception()
             logger.warn("Unable to convert object's is_prepared.name attribute to a relative path")
 
@@ -291,20 +282,19 @@ class ShareRef(GangaObject):
         this results in the directory being deleted upon Ganga exit.
         """
         self._getWriteAccess()
-        from Ganga.GPI import jobs, box, tasks
         # clear the shareref table
         self.name = {}
         lookup_input = []
 
         from Ganga.GPIDev.Lib.File import getSharedPath
-
+        from Ganga.Core.GangaRepository import getRegistryProxy
 
         objectlist = []
-        for thing in jobs.select():
+        for thing in getRegistryProxy('jobs').select():
             objectlist.append({thing: 'job'})
-        for thing in box.select():
+        for thing in getRegistryProxy('box').select():
             objectlist.append({thing: 'box'})
-        for thing in tasks.select():
+        for thing in getRegistryProxy('tasks').select():
             objectlist.append({thing: 'task'})
 
         for item in objectlist:
@@ -312,15 +302,15 @@ class ShareRef(GangaObject):
             try:
                 shortname = item.keys()[0].is_prepared.name
             except AttributeError as err:
-                logger.debug("Err: %s" % str(err))
+                logger.debug("Err: %s" % err)
                 try:
                     shortname = item.keys()[0].application.is_prepared.name
                 except AttributeError as err2:
-                    loggr.debug("Err2: %s" % str(err2))
+                    logger.debug("Err2: %s" % err2)
                     try:
                         shortname = item.keys()[0].analysis.application.is_prepared.name
                     except AttributeError as err3:
-                        logger.debug("Err3: %s" % str(err3))
+                        logger.debug("Err3: %s" % err3)
                         pass
             try:
                 if shortname is not None and shortname is not True:
@@ -329,12 +319,12 @@ class ShareRef(GangaObject):
                     try:
                         numsubjobs = len(item.keys()[0].subjobs.ids())
                     except Exception as err:
-                        logger.debug("Path Error: %s" % str(err))
+                        logger.debug("Path Error: %s" % err)
                         Ganga.Utility.logging.log_unknown_exception()
                         numsubjobs = 0
                     self.helper(shortname, unp=unprepare, numsubjobs=numsubjobs)
             except Exception as err:
-                logger.debug("-Error: %s" % str(err))
+                logger.debug("-Error: %s" % err)
                 Ganga.Utility.logging.log_unknown_exception()
                 pass
 
@@ -346,7 +336,7 @@ class ShareRef(GangaObject):
 
         # check to see that all sharedirs have an entry in the shareref. Otherwise, set their ref counter to 0
         # so the user is made aware of them at shutdown
-        for this_dir in os.listdir(getSharedDir()):
+        for this_dir in os.listdir(getSharedPath()):
             if this_dir not in self.__getName().keys() and rmdir is False:
                 logger.debug("%s isn't referenced by a GangaObject in the Job or Box repository." % this_dir)
                 self.__getName()[this_dir] = 0
@@ -359,7 +349,7 @@ class ShareRef(GangaObject):
 
 
     @staticmethod
-    def yes_no(question, default='none'):
+    def yes_no(question, default='none', shareddir=''):
         """Check whether the user wants to delete sharedirs which are no longer referenced by any Ganga object"""
         valid = {"yes": "yes", "y": "yes", "no": "no",
                      "n": "no", "none": "none", "all": "all"}
@@ -385,7 +375,7 @@ class ShareRef(GangaObject):
     def closedown(self):
         """Cleans up the Shared Directory registry upon shutdown of the registry, ie. when exiting a Ganga session."""
 
-        stripProxy(self)._getRegistry()._hasStarted = True
+        #stripProxy(self)._getRegistry()._hasStarted = True
         from Ganga.GPIDev.Lib.File import getSharedPath
 
         delete_share_config = Ganga.Utility.Config.getConfig('Configuration')['deleteUnusedShareDir']
@@ -405,8 +395,7 @@ class ShareRef(GangaObject):
 
         try:
             ## FIXME. this triggers maximum recusion depth bug on shutdown in some situations! rcurrie
-            _name = getattr(self, name)
-            all_dirs = _name.keys()
+            all_dirs = copy.deepcopy(self.__getName().keys())
         except:
             all_dirs = {}
         for shareddir in all_dirs:
@@ -415,7 +404,7 @@ class ShareRef(GangaObject):
             # filesystem
             if self.__getName()[shareddir] == 0 and os.path.isdir(full_shareddir_path):
                 if ask_delete == 'Ask':
-                    ask_delete = self.yes_no('', default=default)
+                    ask_delete = self.yes_no('', default=default, shareddir=shareddir)
                 if ask_delete == 'yes':
                     shutil.rmtree(full_shareddir_path)
                     if shareddir not in cleanup_list:
@@ -443,8 +432,8 @@ class ShareRef(GangaObject):
             # if the sharedir in the table doesn't exist on the filesytem, and the reference counter is > 0,
             # we need to unprepare any associated jobs
             #logger.debug("Examining: %s" % full_shareddir_path)
-            #logger.debug("shareddir: %s" % str(shareddir))
-            #logger.debug("cleanup_list: %s" % str(cleanup_list))
+            #logger.debug("shareddir: %s" % shareddir)
+            #logger.debug("cleanup_list: %s" % cleanup_list)
             if not os.path.isdir(full_shareddir_path) and shareddir not in cleanup_list:
             #    logger.info('%s not found on disk. Removing entry from shareref table and unpreparing any associated Ganga objects.' % shareddir)
             #    self.lookup(sharedir=shareddir, unprepare=True)
@@ -452,12 +441,15 @@ class ShareRef(GangaObject):
             ## DISABLED BY RCURRIE
 
         self._getWriteAccess()
-        for element in cleanup_list and element in self.__getName():
+        for element in cleanup_list:
+            del self.name[element]
+        allnames = copy.deepcopy(self.__getName())
+        for element in allnames:
             del self.name[element]
         self._setDirty()
         #self._releaseWriteAccess()
 
-        stripProxy(self)._getRegistry()._hasStarted = False
+        #stripProxy(self)._getRegistry()._hasStarted = False
 
     def ls(self, shareddir, print_files=True):
         """
@@ -478,7 +470,7 @@ class ShareRef(GangaObject):
                 symbol = {0: '', 1: '/'}[os.path.isdir(file)]
                 if not print_files and symbol != '/':
                     continue
-                logging.info(padding * level + pieces[-1] + symbol)
+                logger.info(padding * level + pieces[-1] + symbol)
 
     def _display(self, interactive=0):
         """Prints content of the shareref metadata in a well formatted way.
@@ -573,15 +565,5 @@ class _proxy_display(object):
             return stripProxy(cls)._proxy_display
         return stripProxy(obj)._proxy_display
 
-
-# class _copy(object):
-#    def __get__(self, obj, cls):
-#        if obj is None:
-#            return stripProxy(cls)._copy
-#        return stripProxy(obj)._copy
-
 ShareRef.__str__ = ShareRef._display
-ShareRef._proxyClass._display = _proxy_display()
-ShareRef._proxyClass.__str__ = _proxy_display()
-#ShareRef._proxyClass.copy = _copy()
 

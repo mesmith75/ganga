@@ -13,6 +13,7 @@ from Ganga.Utility.Plugin import PluginManagerError, allPlugins
 
 from Ganga.GPIDev.Base.Objects import GangaObject
 from Ganga.GPIDev.Schema import Schema, Version
+from Ganga.GPIDev.Lib.GangaList.GangaList import makeGangaList
 
 from .GangaRepository import SchemaVersionError
 
@@ -39,25 +40,26 @@ class XMLFileError(GangaException):
 
     def __str__(self):
         if self.excpt:
-            err = '(%s:%s)' % (str(type(self.excpt)), str(self.excpt))
+            err = '(%s:%s)' % (type(self.excpt), self.excpt)
         else:
             err = ''
         return "XMLFileError: %s %s" % (self.message, err)
 
-def _raw_to_file(j, fobj=None, ignore_subs=''):
+def _raw_to_file(j, fobj=None, ignore_subs=[]):
     vstreamer = VStreamer(out=fobj, selection=ignore_subs)
     vstreamer.begin_root()
     stripProxy(j).accept(vstreamer)
     vstreamer.end_root()
 
-def to_file(j, fobj=None, ignore_subs=''):
+def to_file(j, fobj=None, ignore_subs=[]):
     #used to debug write problems - rcurrie
     #_raw_to_file(j, fobj, ignore_subs)
     #return
+    _ignore_subs = [ignore_subs] if not isinstance(ignore_subs, list) else ignore_subs
     try:
-        _raw_to_file(j, fobj, ignore_subs)
+        _raw_to_file(j, fobj, _ignore_subs)
     except Exception as err:
-        logger.error("XML to-file error for file:\n%s" % (str(err)))
+        logger.error("XML to-file error for file:\n%s" % (err))
         raise XMLFileError(err, "to-file error")
 
 # Faster, but experimental version of to_file without accept()
@@ -79,14 +81,16 @@ def to_file(j, fobj=None, ignore_subs=''):
 def _raw_from_file(f):
     # logger.debug('----------------------------')
     ###logger.debug('Parsing file: %s',f.name)
-    obj, errors = Loader().parse(f.read())
+    xml_content = f.read()
+    obj, errors = Loader().parse(xml_content)
     return obj, errors
 
 def from_file(f):
+    #return _raw_from_file(f)
     try:
         return _raw_from_file(f)
     except Exception as err:
-        logger.error("XML from-file error for file:\n%s" % str(err))
+        logger.error("XML from-file error for file:\n%s" % err)
         raise XMLFileError(err, "from-file error")
 
 ##########################################################################
@@ -126,7 +130,7 @@ def fastXML(obj, indent='', ignore_subs=''):
                         sl.extend(fastXML(o, indent + '  ', ignore_subs))
                         sl.append('</attribute>\n')
                 except KeyError as err:
-                    logger.debug("KeyError: %s" % str(err))
+                    logger.debug("KeyError: %s" % err)
                     pass
         sl.append(indent)
         sl.append('</class>')
@@ -145,7 +149,7 @@ class VStreamer(object):
     # selection: string specifying the name of properties which should not be printed
     # e.g. 'subjobs' - will not print subjobs
 
-    def __init__(self, out=None, selection=''):
+    def __init__(self, out=None, selection=[]):
         self.level = 0
         self.selection = selection
         if out is not None:
@@ -177,7 +181,7 @@ class VStreamer(object):
         print('\n', self.indent(), '<value>%s</value>' % escape(repr(stripProxy(x))), file=self.out)
 
     def showAttribute(self, node, name):
-        return not node._schema.getItem(name)['transient'] and (self.level > 1 or name != self.selection)
+        return not node._schema.getItem(name)['transient'] and (self.level > 1 or name not in self.selection)
 
     def simpleAttribute(self, node, name, value, sequence):
         if self.showAttribute(node, name):
@@ -213,7 +217,7 @@ class VStreamer(object):
                 print(self.indent(), '<value>%s</value>' % escape(repr(s)), file=self.out)
             elif hasattr(stripProxy(s), 'accept'):
                 stripProxy(s).accept(self)
-            elif isType(s, list) or isType(s, GangaList):
+            elif isType(s, (list, tuple, GangaList)):
                 print(self.indent(), '<sequence>', file=self.out)
                 for sub_s in s:
                     self.acceptOptional(sub_s)
@@ -309,18 +313,15 @@ class Loader(object):
                 else:
                     version = Version(*[int(v) for v in attrs['version'].split('.')])
                     if not cls._schema.version.isCompatible(version):
-                        attrs['currversion'] = '%s.%s' % (
-                            cls._schema.version.major, cls._schema.version.minor)
-                        self.errors.append(SchemaVersionError(
-                            'Incompatible schema of %(name)s, repository is %(version)s currently in use is %(currversion)s' % attrs))
+                        attrs['currversion'] = '%s.%s' % (cls._schema.version.major, cls._schema.version.minor)
+                        self.errors.append(SchemaVersionError('Incompatible schema of %(name)s, repository is %(version)s currently in use is %(currversion)s' % attrs))
                         obj = EmptyGangaObject()
                         # ignore all elemenents until the corresponding ending
                         # element (</class>) is reached
                         self.ignore_count = 1
                     else:
                         # make a new ganga object
-                        obj = super(cls, cls).__new__(cls)
-                        obj.setNodeData({})
+                        obj = cls()
                 self.stack.append(obj)
 
             # push the attribute name on the stack
@@ -352,6 +353,7 @@ class Loader(object):
                 obj = self.stack[-1]
                 # update the object's attribute
                 obj.setNodeAttribute(aname, value)
+                #logger.info("Setting: %s = %s" % (aname, value))
 
             # when </value> is seen the value_construct buffer (CDATA) should
             # be a python expression (e.g. quoted string)
@@ -368,7 +370,7 @@ class Loader(object):
             # we make a GangaList from these items and put it on stack
             if name == 'sequence':
                 pos = self.sequence_start.pop()
-                alist = makeGangaListByRef(self.stack[pos:])
+                alist = makeGangaList(self.stack[pos:])
                 del self.stack[pos:]
                 self.stack.append(alist)
 
@@ -380,12 +382,15 @@ class Loader(object):
                 obj = self.stack[-1]
                 for attr, item in obj._schema.allItems():
                     if not attr in obj.getNodeData():
+                        #logger.info("Opening: %s" % attr)
                         if item._meta["sequence"] == 1:
                             obj.setNodeAttribute(attr, makeGangaListByRef(obj._schema.getDefaultValue(attr)))
+                            #setattr(obj, attr, makeGangaListByRef(obj._schema.getDefaultValue(attr)))
                         else:
                             obj.setNodeAttribute(attr, obj._schema.getDefaultValue(attr))
+                            #setattr(obj, attr, obj._schema.getDefaultValue(attr))
 
-                obj.__setstate__(obj.__dict__)  # this sets the parent
+                #print("Constructed: %s" % getName(obj))
 
         def char_data(data):
             # char_data may be called many times in one CDATA section so we need to build up
@@ -405,10 +410,12 @@ class Loader(object):
         p.Parse(s)
 
         if len(self.stack) != 1:
-            self.errors.append(
-                AssertionError('multiple objects inside <root> element'))
+            self.errors.append(AssertionError('multiple objects inside <root> element'))
 
         obj = self.stack[-1]
+
+        #logger.info("obj.__dict__: %s" % obj.__dict__)
+
         # Raise Exception if object is incomplete
         for attr, item in obj._schema.allItems():
             if not attr in obj.getNodeData():

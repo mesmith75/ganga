@@ -17,7 +17,7 @@ logger = getLogger()
 
 
 def get_share_path(app=None):
-    if app is None or not isType(app, ShareDir):
+    if app is None or not isType(app.is_prepared, ShareDir):
         return os.path.join(expandfilename(getConfig('Configuration')['gangadir']), 'shared', getConfig('Configuration')['user'])
     #elif isType(app, ShareDir):
     else:
@@ -40,9 +40,8 @@ def sharedir_handler(app, root_dir_names, output):
         for root, dirs, files in os.walk(share_dir):
             # [1:] removes the preceeding /
             subdir = root.replace(share_dir, '')[1:]
-            if (type(output) is type([])) or (type(output) is type(GangaList())):
-                output += [File(name=os.path.join(root, f), subdir=subdir)
-                           for f in files]
+            if isType(output, (list, tuple, GangaList)):
+                output += [File(name=os.path.join(root, f), subdir=subdir) for f in files]
 # for f in files:
 ##                 output += [File(name=os.path.join(root,f),subdir=subdir)]
             elif type(output) is type(''):
@@ -76,7 +75,7 @@ def master_sandbox_prepare(app, appmasterconfig, sharedir_roots=None):
     # Note EITHER the master inputsandbox OR the job.inputsandbox is added to
     # the subjob inputsandbox depending if the jobmasterconfig object is present
     # or not... Therefore combine the job.inputsandbox with appmasterconfig.
-    job = app.getJobObject()
+    job = stripProxy(app).getJobObject()
 
     # user added items from the interactive GPI
     from Ganga.Utility.Config import getConfig
@@ -111,7 +110,7 @@ def master_sandbox_prepare(app, appmasterconfig, sharedir_roots=None):
 def sandbox_prepare(app, appsubconfig, appmasterconfig, jobmasterconfig):
 
     logger.debug("RTUTils sandbox_prepare")
-    job = app.getJobObject()
+    job = stripProxy(app).getJobObject()
 
     # Add the job.in/outputsandbox as splitters create subjobs that are
     # seperate Job objects and therefore have their own job.in/outputsandbox

@@ -5,7 +5,7 @@
 ##########################################################################
 
 from Ganga.GPIDev.Base import GangaObject
-from Ganga.GPIDev.Base.Proxy import TypeMismatchError, isType, stripProxy
+from Ganga.GPIDev.Base.Proxy import TypeMismatchError, isType, stripProxy, getName
 from Ganga.GPIDev.Schema import Schema, Version
 from Ganga.Utility.util import containsGangaObjects
 
@@ -25,7 +25,7 @@ class ISplitter(GangaObject):
     def createSubjob(self, job, additional_skip_args=None):
         """ Create a new subjob by copying the master job and setting all fields correctly.
         """
-        from Ganga.GPIDev.Lib.Job import Job
+        from Ganga.GPIDev.Lib.Job.Job import Job
         if additional_skip_args is None:
             additional_skip_args = []
 
@@ -37,7 +37,7 @@ class ISplitter(GangaObject):
         j.splitter = None
         j.inputsandbox = []
         j.inputfiles = []
-        j.inputdata = []
+        j.inputdata = None
         return j
 
     def split(self, job):
@@ -67,7 +67,7 @@ class ISplitter(GangaObject):
         classes. """
 
         # try:
-        subjobs = self.split(job)
+        subjobs = self.split(stripProxy(job))
         # except Exception,x:
         #raise SplittingError(x)
         #raise x
@@ -77,7 +77,7 @@ class ISplitter(GangaObject):
         cnt = 0
         for s in subjobs:
             if not isType(s.backend, type(stripProxy(job.backend))):
-                raise SplittingError('masterjob backend %s is not the same as the subjob (probable subjob id=%d) backend %s' % (job.backend._name, cnt, s.backend._name))
+                raise SplittingError('masterjob backend %s is not the same as the subjob (probable subjob id=%d) backend %s' % (job.backend._name, cnt, getName(s.backend)))
             cnt += 1
 
         return subjobs

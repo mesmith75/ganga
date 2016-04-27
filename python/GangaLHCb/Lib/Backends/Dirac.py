@@ -3,10 +3,13 @@ from GangaDirac.Lib.Backends.DiracBase import DiracBase
 from GangaDirac.Lib.Backends.DiracUtils import result_ok
 from Ganga.GPIDev.Schema import Schema, Version, ComponentItem
 from Ganga.Core import BackendError
+from Ganga.Core import GangaException
 from GangaLHCb.Lib.LHCbDataset.LHCbDataset import LHCbDataset
 from Ganga.GPIDev.Base.Proxy import GPIProxyObjectFactory
 from GangaDirac.Lib.Utilities.DiracUtilities import execute
 from Ganga.GPIDev.Credentials2              import require_credential
+import Ganga.Utility.logging
+logger = Ganga.Utility.logging.getLogger()
 
 
 class Dirac(DiracBase):

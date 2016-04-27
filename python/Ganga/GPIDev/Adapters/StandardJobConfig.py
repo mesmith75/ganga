@@ -56,6 +56,14 @@ class StandardJobConfig(object):
 
         self.processValues()
 
+    def __str__(self):
+        config_str = "Config:"
+        config_str += " Exe str: '%s'" % str(self.getExeString())
+        config_str += " Arg: '%s'" % str(self.getArgStrings())
+        config_str += " Input Sandbox files: '%s'" % str(self.getSandboxFiles())
+        config_str += " Output files: '%s'" % str(self.getOutputSandboxFiles())
+        return config_str
+
     def getSandboxFiles(self):
         '''Get all input sandbox files'''
         return self.__all_inputbox
@@ -73,23 +81,6 @@ class StandardJobConfig(object):
     def getArgStrings(self):
         '''Get a list of strings which correspond to the arguments to the executable on the worker node.'''
         return self.__args_strings
-
-    def getExeCmdString(self):
-        '''Get a command string including the quoted arguments which may be passed to os.system().
-        This method is provided for the convenience'''
-
-        logger.warning(
-            'INTERNAL METHOD JobConfig.getExeCmdString() IS OBSOLETED, backend should be updated to use getExeString() and shell=False in a call to subprocess.Popen()')
-        # reduce the args list into the quoted string: "arg1" "arg2" "arg3"
-        # FIXME: quoting should rather be moved to utility functions
-
-        def quote_arguments(args):
-            quoted = ""
-            for a in args:
-                quoted += '"' + a + '" '
-            return quoted
-
-        return self.__exe_string + ' ' + quote_arguments(self.__args_strings)
 
     def processValues(self):
         '''Process original exe,args and inputbox values and extract strings suitable for the further processing.

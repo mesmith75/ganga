@@ -12,6 +12,7 @@
 import re
 
 from Ganga.GPIDev.Base import GangaObject
+from Ganga.GPIDev.Base.Proxy import getName
 from Ganga.GPIDev.Schema import Schema, Version, SimpleItem, ComponentItem
 
 from Ganga.Utility.logging import getLogger
@@ -90,12 +91,12 @@ class GridSandboxCache(GangaObject):
 
         paths = []
         for f in files:
-            if f.__class__.__name__ == 'File':
+            if getName(f) == 'File':
                 paths.append('file://%s' % f.name)
-            elif f.__class__.__name__ == 'str':
+            elif getName(f) == 'str':
                 paths.append('file://%s' % f)
             else:
-                logger.warning('unknown file expression: %s' % repr(f))
+                self.logger.warning('unknown file expression: %s' % repr(f))
 
         uploaded_files = self.impl_upload(cred_req=cred_req, files=paths, opts=opts)
 
@@ -137,7 +138,7 @@ class GridSandboxCache(GangaObject):
         if len(downloadedFiles) == len(myFiles):
             status = True
         else:
-            logger.warning('some files not successfully downloaded')
+            self.logger.warning('some files not successfully downloaded')
 
         return status
 
@@ -158,7 +159,7 @@ class GridSandboxCache(GangaObject):
         if len(deletedFiles) == len(myFiles):
             status = True
         else:
-            logger.warning('some files not successfully deleted')
+            self.logger.warning('some files not successfully deleted')
 
         return status
 

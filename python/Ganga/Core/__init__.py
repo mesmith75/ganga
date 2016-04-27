@@ -12,7 +12,7 @@ from .exceptions import GangaException, ApplicationConfigurationError, \
     IncompleteJobSubmissionError, IncompleteKillError, JobManagerError, \
     GangaAttributeError, GangaValueError, ProtectedAttributeError, \
     ReadOnlyObjectError, TypeMismatchError, SchemaError, ApplicationPrepareError, \
-    GangaIOError
+    GangaIOError, SplitterError
 
 monitoring_component = None
 
@@ -29,7 +29,15 @@ def set_autostart_policy(interactive_session):
 t_last = None
 
 
-def bootstrap(reg, interactive_session):
+def start_jobregistry_monitor(reg_slice):
+    from Ganga.Core.MonitoringComponent.Local_GangaMC_Service import JobRegistry_Monitor
+    # start the monitoring loop
+    global monitoring_component
+    monitoring_component = JobRegistry_Monitor(reg_slice)
+    monitoring_component.start()
+
+
+def bootstrap(reg_slice, interactive_session, my_interface=None):
     """
     Create local subsystems. In the future this procedure should be enhanced to connect to remote subsystems.
     FIXME: this procedure should be moved to the Runtime package.
@@ -38,17 +46,6 @@ def bootstrap(reg, interactive_session):
     The autostart value may be overriden in the config file, so warn if it differs from the default.
     """
     from Ganga.Core.MonitoringComponent.Local_GangaMC_Service import JobRegistry_Monitor, config
-
-    config.addOption('forced_shutdown_policy', 'session_type',
-                     'If there are remaining background activities at exit such as monitoring, output download Ganga will attempt to wait for the activities to complete. You may select if a user is prompted to answer if he wants to force shutdown ("interactive") or if the system waits on a timeout without questions ("timeout"). The default is "session_type" which will do interactive shutdown for CLI and timeout for scripts.')
-
-    config.addOption('forced_shutdown_timeout', 60,
-                     "Timeout in seconds for forced Ganga shutdown in batch mode.")
-    config.addOption('forced_shutdown_prompt_time', 10,
-                     "User will get the prompt every N seconds, as specified by this parameter.")
-    config.addOption('forced_shutdown_first_prompt_time', 5,
-                     "User will get the FIRST prompt after N seconds, as specified by this parameter. This parameter also defines the time that Ganga will wait before shutting down, if there are only non-critical threads alive, in both interactive and batch mode.")
-
     from Ganga.Utility.logging import getLogger
 
     logger = getLogger()
@@ -60,25 +57,19 @@ def bootstrap(reg, interactive_session):
     Coordinator.bootstrap()
 
     # backend-specific setup (e.g. Remote: setup any remote ssh pipes)
-    # for j in reg:
+    # for j in reg_slice:
     #    if hasattr(j,'status') and j.status in ['submitted','running']:
     #        if hasattr(j,'backend'): # protect: EmptyGangaObject does not have backend either
     #            if hasattr(j.backend,'setup'): # protect: EmptyGangaObject does not have setup() method
     #                j.backend.setup()
 
-    # start the monitoring loop
-    global monitoring_component
-    monitoring_component = JobRegistry_Monitor(reg)
-    monitoring_component.start()
+    start_jobregistry_monitor(reg_slice)
 
     # register the MC shutdown hook
 
     change_atexitPolicy(interactive_session)
 
-    # export to GPI
-    from Ganga.Runtime.GPIexport import exportToGPI
-    exportToGPI(
-        'runMonitoring', monitoring_component.runMonitoring, 'Functions')
+    # export to GPI moved to Runtime bootstrap
 
     autostart_default = interactive_session
     config.overrideDefaultValue('autostart', bool(autostart_default))
@@ -92,6 +83,12 @@ def bootstrap(reg, interactive_session):
     if config['autostart']:
         monitoring_component.enableMonitoring()
 
+    if not my_interface:
+        import Ganga.GPI
+        my_interface = Ganga.GPI
+    from Ganga.Runtime.GPIexport import exportToInterface
+    exportToInterface(my_interface, 'runMonitoring', monitoring_component.runMonitoring, 'Functions')
+        
 
 def should_wait_interactive_cb(t_total, critical_thread_ids, non_critical_thread_ids):
     from Ganga.Core.MonitoringComponent.Local_GangaMC_Service import config
@@ -178,8 +175,7 @@ def change_atexitPolicy(interactive_session=True, new_policy=None):
         from Ganga.Core.GangaThread import GangaThreadPool
         # create generic Ganga thread pool
         thread_pool = GangaThreadPool.getInstance()
-        atexit.register(
-            thread_pool.shutdown, should_wait_cb=at_exit_should_wait_cb)
+        atexit.register(thread_pool.shutdown, should_wait_cb=at_exit_should_wait_cb)
     else:
         at_exit_should_wait_cb = should_wait_cb
 

@@ -12,13 +12,13 @@
 # if a root object has a status field and some load error occurs, it will
 # be set to "incomplete"
 
-import Ganga.Utility.logging
+from Ganga.Utility.logging import getLogger
 
 from Ganga.Utility.Plugin import allPlugins
 from Ganga.Core import GangaException
 from Ganga.GPIDev.Base.Proxy import getName
 
-logger = Ganga.Utility.logging.getLogger()
+logger = getLogger()
 
 # Error raised on schema version error
 
@@ -26,7 +26,7 @@ logger = Ganga.Utility.logging.getLogger()
 class SchemaVersionError(GangaException):
 
     def __init__(self, what=''):
-        GangaException.__init__(self, what)
+        super(SchemaVersionError, self).__init__(what)
         self.what = what
 
     def __str__(self):
@@ -36,7 +36,7 @@ class SchemaVersionError(GangaException):
 class InaccessibleObjectError(GangaException):
 
     def __init__(self, repo=None, id='', orig=None, tb=None):
-        GangaException.__init__(self, "Inaccessible Object")
+        super(InaccessibleObjectError, self).__init__("Inaccessible Object: %s" % id)
         self.repo = repo
         self.id = id
         self.orig = orig
@@ -54,7 +54,7 @@ class RepositoryError(GangaException):
     """ This error is raised if there is a fatal error in the repository."""
 
     def __init__(self, repo=None, what=''):
-        GangaException.__init__(self, what)
+        super(RepositoryError, self).__init__(self, what)
         self.what = what
         self.repository = repo
         logger.error("A severe error occurred in the Repository '%s': %s" % (repo.registry.name, what))
@@ -62,6 +62,8 @@ class RepositoryError(GangaException):
         try:
             from Ganga.Core.InternalServices.Coordinator import disableInternalServices
             disableInternalServices()
+            from Ganga.Core.GangaThread.WorkerThreads import shutdownQueues
+            shutdownQueues()
             logger.error("Shutting Down Repository_runtime")
             from Ganga.Runtime import Repository_runtime
             Repository_runtime.shutdown()
@@ -194,17 +196,18 @@ class GangaRepository(object):
         """Internal helper: adds an empty GangaObject of the given class to the repository.
         Raise RepositoryError
         Raise PluginManagerError if the class name is not found"""
-        if (category, classname) not in self._found_classes:
+        compound_name = str(category+"_"+classname)
+        if compound_name not in self._found_classes:
             cls = allPlugins.find(category, classname)
-            self._found_classes[(category, classname)] = cls
-        cls = self._found_classes[(category, classname)]
-        obj = super(cls, cls).__new__(cls)
-        setattr(obj, '_parent', None)
-        setattr(obj, 'id', '')
-        obj.__init__()
-        obj._proxyObject = None
+            self._found_classes[compound_name] = cls
+        cls = self._found_classes[compound_name]
+        obj = cls()
+        #setattr(obj, '_parent', None)
+        #obj.__init__()
         obj.setNodeData({})
+        obj.setNodeAttribute('id', this_id)
 
+        obj._setFlushed()
         self._internal_setitem__(this_id, obj)
         return obj
 
@@ -218,9 +221,10 @@ class GangaRepository(object):
         setattr(obj, "_registry_id", this_id)
         setattr(obj, "_registry_locked", False)
         setattr(obj, "_id", this_id)
-        if obj.getNodeData() and "id" in obj.getNodeData().keys():  # MAGIC id
-            obj.setNodeAttribute('id', this_id)
+        #if obj.getNodeData() and "id" in obj.getNodeData().keys():  # MAGIC id
+        obj.setNodeAttribute('id', this_id)
         obj._setRegistry(self.registry)
+
 
     def _internal_del__(self, id):
         """ Internal function for repository classes to (logically) delete items to the repository."""

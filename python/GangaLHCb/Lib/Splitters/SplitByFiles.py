@@ -1,17 +1,18 @@
+from Ganga.Core.exceptions import SplitterError
 from GangaGaudi.Lib.Splitters.GaudiInputDataSplitter import GaudiInputDataSplitter
 from Ganga.GPIDev.Adapters.ISplitter import SplittingError
 from Ganga.GPIDev.Schema import Schema, Version, SimpleItem
-from GangaLHCb.Lib.LHCbDataset.LHCbDataset import LHCbDataset
 from Ganga.Utility.Config import getConfig
 from Ganga.Utility.files import expandfilename
 from Ganga.GPIDev.Base.Proxy import stripProxy, isType, getName
 import Ganga.Utility.logging
 from Ganga.GPIDev.Lib.Job import Job
+from GangaDirac.Lib.Files.DiracFile import DiracFile
 import os
 import copy
 import pickle
 
-from Ganga.GPIDev.Lib.File import IGangaFile
+from Ganga.GPIDev.Adapters.IGangaFile import IGangaFile
 from Ganga.GPIDev.Base.Filters import allComponentFilters
 from Ganga.GPIDev.Lib.GangaList.GangaList import GangaList
 
@@ -74,6 +75,8 @@ class SplitByFiles(GaudiInputDataSplitter):
         logger.debug("dataset size: %s" % str(len(dataset)))
         #logger.debug( "dataset: %s" % str(dataset) )
 
+        from GangaLHCb.Lib.LHCbDataset.LHCbDataset import LHCbDataset
+
         if isinstance(dataset, LHCbDataset):
             for i in dataset:
                 if isType(i, DiracFile):
@@ -84,7 +87,7 @@ class SplitByFiles(GaudiInputDataSplitter):
                     raise GangaException("Unkown file-type %s, cannot perform split with file %s" % (type(i), str(i)))
         elif type(dataset) == type([]) or isType(dataset, GangaList()):
             for this_file in dataset:
-                if type(this_file) == type(''):
+                if type(this_file) is str:
                     datatmp.append(allComponentFilters['gangafiles'](this_file, None))
                 elif isType(this_file, IGangaFile):
                     datatmp.append(this_file)
@@ -94,7 +97,7 @@ class SplitByFiles(GaudiInputDataSplitter):
                     from Ganga.Core.exceptions import GangaException
                     x = GangaException("Unknown(unexpected) file object: %s" % this_file)
                     raise x
-        elif type(dataset) == type(''):
+        elif type(dataset) is str:
             datatmp.append(DiracFile(lfn=dataset))
         else:
             logger.error("Unkown dataset type, cannot perform split here")

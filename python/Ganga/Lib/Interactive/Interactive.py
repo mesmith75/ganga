@@ -26,9 +26,10 @@ __version__ = "1.4"
 
 from Ganga.Core import Sandbox
 from Ganga.GPIDev.Adapters.IBackend import IBackend
+from Ganga.GPIDev.Base.Proxy import stripProxy, getName
 from Ganga.GPIDev.Lib.File import FileBuffer
 from Ganga.GPIDev.Schema import Schema, SimpleItem, Version
-from Ganga.Utility import logging, util
+from Ganga.Utility import util
 from Ganga.Utility.Config import getConfig
 from Ganga.Utility.Shell import expand_vars
 
@@ -40,8 +41,9 @@ import signal
 import time
 import tempfile
 
+from Ganga.Utility.logging import getLogger
 
-logger = logging.getLogger()
+logger = getLogger()
 
 
 class Interactive(IBackend):
@@ -166,7 +168,13 @@ class Interactive(IBackend):
 
         job = self.getJobObject()
 
-        inputfiles = jobconfig.getSandboxFiles()
+        from Ganga.GPIDev.Lib.File import File
+        from Ganga.Core.Sandbox.WNSandbox import PYTHON_DIR
+        import Ganga.Utility.files
+        import inspect
+
+        fileutils = File( inspect.getsourcefile(Ganga.Utility.files), subdir=PYTHON_DIR )
+        inputfiles = jobconfig.getSandboxFiles() + [ fileutils ]
         inbox = job.createPackedInputSandbox(inputfiles)
 
         inbox.extend(master_input_sandbox)
@@ -203,7 +211,7 @@ class Interactive(IBackend):
 
             for inputFile in all_inputfiles:
 
-                inputfileClassName = inputFile.__class__.__name__
+                inputfileClassName = getName(inputFile)
 
                 logger.debug("name: %s" % inputfileClassName)
                 logger.debug("result: %s" % str(outputFilePostProcessingOnWN(job, inputfileClassName)))
@@ -268,12 +276,14 @@ class Interactive(IBackend):
         for j in jobs:
             stripProxy(j)._getWriteAccess()
 
+            raw_backend = stripProxy(j.backend)
+
             if not j.backend.id:
-                id = j.backend._getIntFromOutfile("PID:", "__id__")
+                id = raw_backend._getIntFromOutfile("PID:", "__id__")
                 if id > 0:
-                    j.backend.id = id
+                    raw_backend.id = id
                     if ("submitted" == j.backend.status):
-                        j.backend.status = "running"
+                        raw_backend.status = "running"
 
               # Check that the process is still alive
             if j.backend.id:
@@ -281,17 +291,16 @@ class Interactive(IBackend):
                     os.kill(j.backend.id, 0)
                 except Exception as err:
                     logger.debug("Err: %s" % str(err))
-                    j.backend.status = "completed"
+                    raw_backend.status = "completed"
 
             if j.backend.status in ["completed", "failed", "killed"]:
-                j.backend.exitcode = j.backend._getIntFromOutfile\
-                        ("EXITCODE:", "__jobstatus__")
+                raw_backend.exitcode = raw_backend._getIntFromOutfile("EXITCODE:", "__jobstatus__")
                # Set job status to failed for non-zero exit code
                 if j.backend.exitcode:
                     if j.backend.exitcode in [2, 9, 256]:
-                        j.backend.status = "killed"
+                        raw_backend.status = "killed"
                     else:
-                        j.backend.status = "failed"
+                        raw_backend.status = "failed"
                 if (j.backend.status != j.status):
                     j.updateStatus(j.backend.status)
 

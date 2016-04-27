@@ -1,8 +1,10 @@
+from Ganga.Core import GangaException
 from Ganga.GPIDev.Base.Objects import GangaObject
 from Ganga.GPIDev.Base.Filters import allComponentFilters
-from Ganga.GPIDev.Base.Proxy import isProxy, addProxy, isType, getProxyAttr, stripProxy, TypeMismatchError, ReadOnlyObjectError
+from Ganga.GPIDev.Base.Proxy import isProxy, addProxy, isType, getProxyAttr, stripProxy, TypeMismatchError, ReadOnlyObjectError, getName
 from Ganga.GPIDev.Base.VPrinter import full_print, summary_print
 from Ganga.GPIDev.Schema.Schema import ComponentItem, Schema, SimpleItem, Version
+from Ganga.GPIDev.Base.Objects import synchronised
 from Ganga.Utility.util import containsGangaObjects
 import copy
 import sys
@@ -22,24 +24,17 @@ def makeGangaList(_list, mapfunction=None, parent=None, preparable=False):
     else:
         _list = [_list]
 
-    #logger.debug("_list: %s" % str(_list))
-
     if mapfunction is not None:
         _list = map(mapfunction, _list)
 
-    #logger.debug("Making a GangaList of size: %s" % str(len(_list)))
-    result = makeGangaListByRef(_list)
-
+    result = GangaList()
+    result._list = [ stripProxy(e) for e in _list ]
     result._is_preparable = preparable
+    result._is_a_ref = False
 
     # set the parent if possible
     if parent is not None:
         result._setParent(parent)
-
-        for r in result:
-            bare_r = stripProxy(r)
-            if isType(bare_r, GangaObject) and bare_r._getParent() is None:
-                bare_r._setParent(parent)
 
     return result
 
@@ -52,11 +47,12 @@ def stripGangaList(_list):
     return result
 
 
-def makeGangaListByRef(_list):
+def makeGangaListByRef(_list, preparable=False):
     """Faster version of makeGangaList. Does not make a copy of _list but use it by reference."""
     result = GangaList()
-    temp_list = [stripProxy(element) for element in _list]
-    result._list = temp_list
+    result._list = _list
+    result._is_a_ref = True
+    result._is_preparable = preparable
     return result
 
 
@@ -88,13 +84,14 @@ class GangaList(GangaObject):
     _hidden = 1
     _enable_plugin = 1
     _name = 'GangaList'
-    _schema = Schema(Version(1, 0), {'_list': ComponentItem(defvalue=[], doc='The raw list', hidden=1, category='internal'),
+    _schema = Schema(Version(1, 0), {'_list': SimpleItem(defvalue=[], doc='The raw list', hidden=1, category='internal'),
                                      '_is_preparable': SimpleItem(defvalue=False, doc='defines if prepare lock is checked', hidden=1),
                                     })
     _enable_config = 1
     _data={}
 
     def __init__(self):
+        self._is_a_ref = False
         super(GangaList, self).__init__()
 
     def __construct__(self, args):
@@ -104,11 +101,11 @@ class GangaList(GangaObject):
         if len(args) == 1:
             if isType(args[0], (len, GangaList, tuple)):
                 for element_i in args[0]:
-                    self._list.expand(strip_proxy(element_i))
-            elif _list is None:
+                    self._list.expand(self.strip_proxy(element_i))
+            elif args[0] is None:
                 self._list = None
             else:
-                raise GangaError("Construct: Attempting to assign a non list item: %s to a GangaList._list!" % str(value))
+                raise GangaException("Construct: Attempting to assign a non list item: %s to a GangaList._list!" % str(args[0]))
         else:
             super(GangaList, self).__construct__(args)
 
@@ -128,34 +125,49 @@ class GangaList(GangaObject):
     def _attribute_filter__set__(self, name, value):
         logger.debug("GangaList filter")
         if name == "_list":
-            if is_list(value):
-                if has_proxy_elemnt(value):
-                    return [stripProxy(element) for element in value]
+            if self.is_list(value):
+                if self.has_proxy_element(value):
+                    returnable_list = [stripProxy(element) for element in value]
+                    for elem in returnable_list:
+                        if isType(elem, GangaObject):
+                            elem._setParent(self._getParent())
+                    return returnable_list
                 else:
                     return value
-            elif _list is None:
+            elif self._list is None:
                 return None
             else:
-                raise GangaError("Attempting to assign a non list item: %$s to a GangaList._list!" % str(value))
+                raise GangaException("Attempting to assign a non list item: %s to a GangaList._list!" % str(value))
         else:
             return super(GangaList, self)._attribute_filter__set__(name, value)
 
     def _on_attribute__set__(self, obj_type, attrib_name):
-        new_list = []
-        for i in self._list:
-            if hasattr(i, '_on_attribute__set__'):
-                new_list.append(i._on_attribute__set__(obj_type, attrib_name))
-                continue
-            new_list.append(i)
-        self._list = new_list
+        if self._is_a_ref is True:
+            new_list = []
+            for i in self._list:
+                if hasattr(i, '_on_attribute__set__'):
+                    new_list.append(i._on_attribute__set__(obj_type, attrib_name))
+                    continue
+                new_list.append(i)
+            self._list = new_list
+            self._is_a_ref = False
         return self
+
+    def _getParent(self):
+        return super(GangaList, self)._getParent()
+
+    def _setParent(self, parent):
+        super(GangaList, self)._setParent(parent)
+        for element in self._list:
+            if isType(element, GangaObject):
+                stripProxy(element)._setParent(parent)
 
     def get(self, to_match):
         def matching_filter(item):
             if '_list_get__match__' in dir(item):
                 return item._list_get__match__(to_match)
             return to_match == item
-        return makeGangaListByRef(filter(matching_filter, self._list))
+        return makeGangaListByRef(filter(matching_filter, self._list), preparable=self._is_preparable)
 
     def _export_get(self, to_match):
         return addProxy(self.get(stripProxy(to_match)))
@@ -219,7 +231,7 @@ class GangaList(GangaObject):
         """Puts a hook in to stop mutable access to readonly jobs."""
         if self._readonly():
             raise ReadOnlyObjectError(
-                'object %s is readonly and attribute "%s" cannot be modified now' % (repr(self), self._name))
+                'object %s is readonly and attribute "%s" cannot be modified now' % (repr(self), getName(self)))
         else:
             self._getWriteAccess()
             # TODO: BUG: This should only be set _after_ the change has been
@@ -236,7 +248,7 @@ class GangaList(GangaObject):
         if not self.is_list(obj_list):
             raise TypeError('Type %s can not be concatinated to a GangaList' % type(obj_list))
 
-        return makeGangaList(self._list.__add__(self.strip_proxy_list(obj_list, True)))
+        return makeGangaList(self._list.__add__(self.strip_proxy_list(obj_list, True)), preparable=self._is_preparable)
 
     def _export___add__(self, obj_list):
         self.checkReadOnly()
@@ -245,9 +257,12 @@ class GangaList(GangaObject):
     def __contains__(self, obj):
         return self._list.__contains__(self.strip_proxy(obj))
 
+    def __clone__(self):
+        return makeGangaListByRef(_list=copy.copy(self._list), preparable=self._is_preparable)
+
     def __copy__(self):
         """Bypass any checking when making the copy"""
-        return makeGangaList(_list=copy.copy(self._list))
+        return makeGangaListByRef(_list=copy.copy(self._list), preparable=self._is_preparable)
 
     def __delitem__(self, obj):
         self._list.__delitem__(self.strip_proxy(obj))
@@ -268,23 +283,36 @@ class GangaList(GangaObject):
         #logger.info("memo: %s" % str(memo))
         #logger.info("self.len: %s" % str(len(self._list)))
         if self._list != []:
-            return makeGangaList(_list=copy.deepcopy(self._list, memo), preparable=self._is_preparable)
+            return makeGangaListByRef(_list=copy.deepcopy(self._list), preparable=self._is_preparable)
         else:
             new_list = GangaList()
             new_list._is_preparable = self._is_preparable
             return new_list
-        #super(GangaList, self).__deepcopy__(memo)
+
+    def __getListToCompare(self, input_list):
+
+        # if the arg isn't a list, just give it back
+        if not self.is_list(self.strip_proxy(input_list)):
+            return input_list
+
+        # setup up the list correctly
+        tmp_list = input_list
+        if isType(input_list, GangaList):
+            # GangaLists should never contain proxied objects so just return the list
+            return stripProxy(input_list)._list
+        elif isinstance(input_list, tuple):
+            tmp_list = list(input_list)
+
+        # Now return the list after stripping any objects of proxies
+        return self.strip_proxy_list(tmp_list)
 
     def __eq__(self, obj_list):
         if obj_list is self:  # identity check
             return True
-        result = False
-        if self.is_list(self.strip_proxy(obj_list)):
-            result = self._list.__eq__(self.strip_proxy_list(obj_list))
-        return result
+        return self._list == self.__getListToCompare(obj_list)
 
     def __ge__(self, obj_list):
-        return self._list.__ge__(self.strip_proxy_list(obj_list))
+        return self._list.__ge__(self.__getListToCompare(obj_list))
 
     def __getitem__(self, index):
         return self._list.__getitem__(index)
@@ -293,7 +321,7 @@ class GangaList(GangaObject):
         return addProxy(self.__getitem__(index))
 
     def __getslice__(self, start, end):
-        return makeGangaList(_list=self._list.__getslice__(start, end))
+        return makeGangaList(_list=self._list.__getslice__(start, end), preparable=self._is_preparable)
 
     def _export___getslice__(self, start, end):
         return addProxy(self.__getslice__(start, end))
@@ -341,14 +369,14 @@ class GangaList(GangaObject):
         return self._list.__lt__(self.strip_proxy_list(obj_list))
 
     def __mul__(self, number):
-        return makeGangaList(self._list.__mul__(number))
+        return makeGangaList(self._list.__mul__(number), preparable=self._is_preparable)
 
     def _export___mul__(self, number):
         return addProxy(self.__mul__(number))
 
     def __ne__(self, obj_list):
         if obj_list is self:  # identity check
-            return True
+            return False
         result = True
         if self.is_list(obj_list):
             result = self._list.__ne__(self.strip_proxy_list(obj_list))
@@ -372,7 +400,7 @@ class GangaList(GangaObject):
         return obj + cp
 
     def __rmul__(self, number):
-        return makeGangaList(self._list.__rmul__(number))
+        return makeGangaList(self._list.__rmul__(number), preparable=self._is_preparable)
 
     def _export___rmul__(self, number):
         return addProxy(self.__rmul__(number))
@@ -396,14 +424,41 @@ class GangaList(GangaObject):
         #return self.toString()
         #import traceback
         #traceback.print_stack()
-        return str("<GangaList at: %s>" % str(hex(abs(id(self)))))
+        containsObj = False
+        for elem in self._list:
+            if isType(elem, GangaObject):
+                containsObj = True
+                break
+        if containsObj is False:
+            return self.toString()
+        else:
+            return str("<GangaList at: %s>" % str(hex(abs(id(self)))))
+        #return str("<GangaList at: %s>" % str(hex(abs(id(self)))))
 
     def __str__(self):
         #logger.info("__str__")
         return self.toString()
 
     def append(self, obj, my_filter=True):
-        self._list.append(self.strip_proxy(obj, my_filter))
+        if isType(obj, GangaList):
+            self._list.append(stripProxy(obj))
+            return
+        elem = self.strip_proxy(obj, my_filter)
+        list_objs = (list, tuple)
+        if isType(elem, GangaObject):
+            stripProxy(elem)._setParent(self._getParent())
+            self._list.append(elem)
+        elif isinstance(elem, list_objs):
+            new_list = []
+            for _obj in elem:
+                if isType(_obj, GangaObject):
+                    new_list.append(stripProxy(_obj))
+                    stripProxy(_obj)._setParent(self._getParent())
+                else:
+                    new_list.append(_obj)
+            self._list.append(new_list)
+        else:
+            self._list.append(elem)
 
     def _export_append(self, obj):
         self.checkReadOnly()
@@ -424,6 +479,8 @@ class GangaList(GangaObject):
         return self._list.index(self.strip_proxy(obj))
 
     def insert(self, index, obj):
+        if isType(obj, GangaObject):
+            stripProxy(obj)._setParent(stripProxy(self)._getParent())
         self._list.insert(index, self.strip_proxy(obj, True))
 
     def _export_insert(self, index, obj):
@@ -470,7 +527,7 @@ class GangaList(GangaObject):
                     break
         return result
 
-    def printSummaryTree(self, level=0, verbosity_level=0, whitespace_marker='', out=sys.stdout, selection=''):
+    def printSummaryTree(self, level=0, verbosity_level=0, whitespace_marker='', out=sys.stdout, selection='', interactive=False):
         parent = self._getParent()
         schema_entry = self.findSchemaParentSchemaEntry(parent)
 
@@ -490,7 +547,7 @@ class GangaList(GangaObject):
                 return
 
             if (maxLen != -1) and (self_len > maxLen):
-                out.write(decorateListEntries(self_len, type(self[0]).__name__))
+                out.write(decorateListEntries(self_len, getName(type(self[0]))))
                 return
             else:
                 summary_print(self, out)
@@ -513,7 +570,37 @@ class GangaList(GangaObject):
         returnable_str += "]"
         return returnable_str
 
+    # accept a visitor pattern - overrides GangaObject because we need to process _list as a ComponentItem in this
+    # case to allow save/load of nested lists to work.
+    # Could just get away with SimpleItem checks here but have included Shared and Component just in case these
+    # are added in the future
+    @synchronised
+    def accept(self, visitor):
+        visitor.nodeBegin(self)
 
-from Ganga.Runtime.GPIexport import exportToGPI
-exportToGPI('GangaList', GangaList, 'Classes')
+        for (name, item) in self._schema.simpleItems():
+            if name == "_list":
+                visitor.componentAttribute(self, "_list", self._getdata("_list"), 1)
+            elif item['visitable']:
+                visitor.simpleAttribute(self, name, self._getdata(name), item['sequence'])
+
+        for (name, item) in self._schema.sharedItems():
+            if item['visitable']:
+                visitor.sharedAttribute(self, name, self._getdata(name), item['sequence'])
+
+        for (name, item) in self._schema.componentItems():
+            if item['visitable']:
+                visitor.componentAttribute(self, name, self._getdata(name), item['sequence'])
+
+        visitor.nodeEnd(self)
+
+    def _setFlushed(self):
+        """Set flushed like the Node but do the _list by hand to avoid problems"""
+        self._dirty = False
+        from Ganga.GPIDev.Base.Objects import Node
+        for elem in self._list:
+            if isinstance(elem, Node):
+                elem._setFlushed()
+
+# export to GPI moved to the Runtime bootstrap
 

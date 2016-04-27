@@ -148,38 +148,21 @@ def execute_once():
 
 def hostname():
     """ Try to get the hostname in the most possible reliable way as described in the Python LibRef."""
-    import socket
-    try:
-        return socket.gethostbyaddr(socket.gethostname())[0]
-    # [bugfix #20333]:
-    # while working offline and with an improper /etc/hosts configuration
-    # the localhost cannot be resolved
-    except:
-        return 'localhost'
-# ------------------------
 
-
-class Borg(object):
-
-    """
-    *Python Cookbook recipe 6.16*
-    Borg implementation
-    """
-    _shared_state = {}
-
-    def __new__(cls, *args, **kw):
-        obj = object.__new__(cls, *args, **kw)
-        obj.__dict__ = cls._shared_state
-        return obj
-
-    def __eq__(self, other):
+    # cache the result to prevent lockups in gethostbyaddr calls with queues
+    if hostname._hostname_cache == '':
+        import socket
         try:
-            return self.__dict__ is other.__dict__
-        except AttributeError:
-            return False
+            hostname._hostname_cache = socket.gethostbyaddr(hostname_tmp)[0]
+        # [bugfix #20333]:
+        # while working offline and with an improper /etc/hosts configuration
+        # the localhost cannot be resolved
+        except:
+            hostname._hostname_cache = 'localhost'
 
-    def __hash__(self):
-        return 0
+    return hostname._hostname_cache
+
+hostname._hostname_cache = ''
 
 # ------------------------
 
@@ -266,7 +249,8 @@ def proxy(obj, *specials):
     key = obj_cls, specials
     cls = known_proxy_classes.get(key)
     if cls is None:
-        cls = type("%sProxy" % obj_cls.__name__, (Proxy, ), {})
+        from Ganga.GPIDev.Base.Proxy import getName
+        cls = type("%sProxy" % getName(obj_cls), (Proxy, ), {})
         for name in specials:
             name = '__%s__' % name
             unbounded_method = getattr(obj_cls, name)
@@ -280,7 +264,7 @@ def proxy(obj, *specials):
 def importName(modulename, name):
     try:
         module = __import__(modulename, globals(), locals(), [name])
-    except ImportError, err:
+    except ImportError as err:
         import sys
         sys.stderr.write("importName, ImportError: %s\n" % str(err))
         return None

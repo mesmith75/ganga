@@ -7,22 +7,24 @@ import os.path
 from Ganga.GPIDev.Base.Proxy import stripProxy, GPIProxyObjectFactory, isType, getName
 from Ganga.GPIDev.Lib.GangaList.GangaList import GangaList
 from Ganga.GPIDev.Schema import Schema, Version, SimpleItem, ComponentItem
-from Ganga.GPIDev.Lib.File.IGangaFile import IGangaFile
+from Ganga.GPIDev.Adapters.IGangaFile import IGangaFile
 from Ganga.GPIDev.Lib.Job.Job import Job
 from Ganga.Core.exceptions import GangaException
 from Ganga.Utility.files import expandfilename
 from GangaDirac.Lib.Utilities.DiracUtilities import getDiracEnv, execute
-from Ganga.GPI import queues
 from Ganga.Utility.Config import getConfig
 from Ganga.Utility.logging import getLogger
 configDirac = getConfig('DIRAC')
 logger = getLogger()
 regex = re.compile('[*?\[\]]')
 
+global stored_list_of_sites
+stored_list_of_sites = []
+
 
 def all_SE_list(first_SE = ''):
 
-    stored_list_of_sites = []
+    global stored_list_of_sites
     if stored_list_of_sites != []:
         return stored_list_of_sites
 
@@ -160,7 +162,7 @@ class DiracFile(IGangaFile):
         c.remoteDir = self.remoteDir
         c.namePattern = self.namePattern
         c.compressed = self.compressed
-        c.locations = copy.deepcopy(self.locations)
+        c.locations = self.locations
         c.guid = self.guid
         c._storedReplicas = self._storedReplicas
         c._remoteURLs = self._remoteURLs
@@ -311,6 +313,10 @@ class DiracFile(IGangaFile):
 
         logger.debug("DiracFile: setLocation")
 
+        if not stripProxy(self).getJobObject():
+            logger.error("No job assocaited with DiracFile: %s" % str(self))
+            return
+
         job = self.getJobObject()
         postprocessLocationsPath = os.path.join(job.outputdir, getConfig('Output')['PostProcessLocationsFileName'])
 
@@ -335,7 +341,6 @@ class DiracFile(IGangaFile):
         Remove called when job is removed as long as config option allows
         """
         if self.lfn != '':
-            #queues.add(self.remove)
             self.remove()
 
     def remove(self):
@@ -374,15 +379,13 @@ class DiracFile(IGangaFile):
             try:
                 if self.guid != ret['Value']['Successful'][self.lfn]['GUID']:
                     self.guid = ret['Value']['Successful'][self.lfn]['GUID']
-            except Exception as err:
-                logger.debug("Exception: %s" % str(err))
+            except:
                 pass
 
         try:
             reps = self.getReplicas()
             ret['Value']['Successful'][self.lfn].update({'replicas': self.locations})
-        except Exception as err:
-            logger.debug("Exception: %s" % str(err))
+        except:
             pass
 
         return ret
@@ -461,9 +464,12 @@ class DiracFile(IGangaFile):
                     raise GangaError("Couldn't find replicas for: %s" % str(self.lfn))
                 logger.debug("getReplicas: %s" % str(self._storedReplicas))
 
-                self._updateRemoteURLs(self._storedReplicas)
+                if self.lfn in self._storedReplicas.keys():
+                    self._updateRemoteURLs(self._storedReplicas)
 
-                these_replicas = [self._storedReplicas[self.lfn]]
+                    these_replicas = [self._storedReplicas[self.lfn]]
+                else:
+                    these_replicas = {}
             elif self._storedReplicas != {}:
                 these_replicas = [self._storedReplicas[self.lfn]]
 
@@ -581,7 +587,7 @@ class DiracFile(IGangaFile):
 
             if self.localDir is None:
                 #to_location = os.getcwd()
-                if self._getParent() is not None and os.path.isdir(self.getJobObject().outputdir):
+                if self._parent is not None and os.path.isdir(self.getJobObject().outputdir):
                     to_location = self.getJobObject().outputdir
                 else:
                     to_location = os.getcwd()
@@ -699,7 +705,7 @@ class DiracFile(IGangaFile):
         if self.localDir is None:
             sourceDir = os.getcwd()
             # attached to a job, use the joboutputdir
-            if self._getParent() != None and os.path.isdir(self.getJobObject().outputdir):
+            if self._parent != None and os.path.isdir(self.getJobObject().outputdir):
                 sourceDir = self.getJobObject().outputdir
 
         if not os.path.isdir(sourceDir):
@@ -711,24 +717,17 @@ class DiracFile(IGangaFile):
                 logger.warning("LFN will be generated automatically")
                 self.lfn = ""
 
+        selfConstructedLFN = False
 
         import glob
         if self.remoteDir == '' and self.lfn == '':
-            try:
-                myJob = self.getJobObject()
-            except Exception as err:
-                logger.debug("Err: %s" % str(err))
-                myJob = None
-
-            if myJob is not None:
-                self.lfn = os.path.join(configDirac['DiracLFNBase'], 'GangaFiles_Job_%s' % str(myJob.getFQID('.')), self.namePattern)
-            else:
-                import datetime
-                t = datetime.datetime.now()
-                this_date = t.strftime("%H.%M.%S_%A_%d_%B_%Y")
-                self.lfn = os.path.join(configDirac['DiracLFNBase'], 'GangaFiles_%s' % this_date, self.namePattern)
-        if self.remoteDir == '' and self.lfn != '':
-            self.remoteDir = configDirac['DiracLFNBase']
+            import datetime
+            t = datetime.datetime.now()
+            this_date = t.strftime("%H.%M_%A_%d_%B_%Y")
+            self.lfn = os.path.join(configDirac['DiracLFNBase'], 'GangaFiles_%s' % this_date)
+            selfConstructedLFN = True
+        #if self.remoteDir == '' and self.lfn != '':
+        #    self.remoteDir = configDirac['DiracLFNBase']
 
         if self.remoteDir[:4] == 'LFN:':
             lfn_base = self.remoteDir[4:]
@@ -757,9 +756,13 @@ class DiracFile(IGangaFile):
                     if not os.path.exists(name):
                         raise GangaException('File "%s" must exist!' % name)
 
-            lfn = self.lfn
             if lfn == "":
                 lfn = os.path.join(lfn_base, os.path.basename(name))
+
+            if selfConstructedLFN is True:
+                self.lfn = os.path.join(self.lfn, os.path.basename(name))
+
+            lfn = self.lfn
 
             d = DiracFile()
             d.namePattern = os.path.basename(name)
@@ -774,7 +777,7 @@ class DiracFile(IGangaFile):
                 continue
             if stdout.get('OK', False) and lfn in stdout.get('Value', {'Successful': {}})['Successful']:
                 # when doing the two step upload delete the temp file
-                if self.compressed or self._getParent() != None:
+                if self.compressed or self._parent != None:
                     os.remove(name)
                 # need another eval as datetime needs to be included.
                 guid = stdout['Value']['Successful'][lfn].get('GUID', '')
@@ -882,20 +885,14 @@ for f in glob.glob('###NAME_PATTERN###'):
         WNscript_location = os.path.join( script_path, 'WNInjectTemplate.py' )
         script = FileUtils.loadScript(WNscript_location, '###INDENT###')
 
-        if self.remoteDir == '' and self.lfn == '':
-            try:
-                myJob = self.getJobObject()
-            except Exception as err:
-                logger.debug("Err: %s" % str(err))
-                myJob = None
+        selfConstructedLFNs = False
 
-            if myJob is not None:
-                self.lfn = os.path.join(configDirac['DiracLFNBase'], 'GangaFiles_Job_%s' % str(myJob.getFQID('.')), self.namePattern)
-            else:
-                import datetime
-                t = datetime.datetime.now()
-                this_date = t.strftime("%H.%M.%S_%A_%d_%B_%Y")
-                self.lfn = os.path.join(configDirac['DiracLFNBase'], 'GangaFiles_%s' % this_date, self.namePattern)
+        if self.remoteDir == '' and self.lfn == '':
+            import datetime
+            t = datetime.datetime.now()
+            this_date = t.strftime("%H.%M_%A_%d_%B_%Y")
+            self.lfn = os.path.join(configDirac['DiracLFNBase'], 'GangaFiles_%s' % this_date)
+            selfConstructedLFNs = True
 
         if self.remoteDir == '' and self.lfn != '':
             self.remoteDir = configDirac['DiracLFNBase']
@@ -908,14 +905,15 @@ for f in glob.glob('###NAME_PATTERN###'):
 
         for this_file in outputFiles:
             isCompressed = this_file.namePattern in patternsToZip
+
             if not regex.search(this_file.namePattern) is None:
                 script += self._WN_wildcard_script(this_file.namePattern, lfn_base, str(isCompressed))
             else:
-                script += '###INDENT###print("Uploading: %s")\n' % this_file.namePattern
+                script += '###INDENT###print("Uploading: %s as: %s")\n' % (this_file.namePattern, str(os.path.join(lfn_base, this_file.namePattern)))
                 script += '###INDENT###processes.append(uploadFile("%s", "%s", %s))\n' % (this_file.namePattern, lfn_base, str(isCompressed))
 
 
-        if stripProxy(self)._getParent() and getName(stripProxy(self).getJobObject().backend) != 'Dirac':
+        if stripProxy(self)._parent is not None and stripProxy(self).getJobObject() and getName(stripProxy(self).getJobObject().backend) != 'Dirac':
             script_env = self._getDiracEnvStr()
         else:
             script_env = str(None)

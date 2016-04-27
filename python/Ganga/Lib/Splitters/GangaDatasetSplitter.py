@@ -5,9 +5,11 @@
 ##########################################################################
 
 from Ganga.Core.exceptions import ApplicationConfigurationError
+from Ganga.GPIDev.Base.Proxy import isType
 from Ganga.GPIDev.Schema import Schema, Version, SimpleItem
 from Ganga.GPIDev.Adapters.ISplitter import ISplitter
 from Ganga.GPIDev.Lib.Dataset import GangaDataset
+
 
 
 class GangaDatasetSplitter(ISplitter):
@@ -15,7 +17,7 @@ class GangaDatasetSplitter(ISplitter):
     """ Split job based on files given in GangaDataset inputdata field """
     _name = "GangaDatasetSplitter"
     _schema = Schema(Version(1, 0), {
-        'files_per_subjob': SimpleItem(defvalue=5, doc='the number of files per subjob', typelist=["int"]),
+        'files_per_subjob': SimpleItem(defvalue=5, doc='the number of files per subjob', typelist=[int]),
     })
 
     def split(self, job):

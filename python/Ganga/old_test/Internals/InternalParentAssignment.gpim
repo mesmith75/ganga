@@ -1,0 +1,34 @@
+#!/usr/bin/env python
+
+from GangaTest.Framework.tests import MultipassTest
+
+from Ganga.GPIDev.Base.Proxy import stripProxy
+
+class InternalParentAssignment(MultipassTest):
+
+    def __init__(self): MultipassTest.__init__(self, 2)
+
+    def pass1(self):
+        j = Job()
+        from Ganga.Utility.Config import getConfig
+        if not getConfig('Output')['ForbidLegacyInput']:
+            j.inputsandbox = ['a', 'b', 'c']
+            assert(stripProxy(j.inputsandbox[0])._parent)
+        else:
+            j.inputfiles = [LocalFile('a'), LocalFile('b'), LocalFile('c')]
+            assert(stripProxy(j.inputfiles[0])._parent)
+        # print j
+        # print jobs(j.id)
+        #disableServices()
+        #reactivate()
+        return j.id
+
+    def pass2(self):
+        # print self.data
+        j = jobs(self.data[1])
+        # print j
+        from Ganga.Utility.Config import getConfig
+        if not getConfig('Output')['ForbidLegacyInput']:
+            assert(stripProxy(j.inputsandbox[0])._parent)
+        else:
+            assert(stripProxy(j.inputfiles[0])._parent)

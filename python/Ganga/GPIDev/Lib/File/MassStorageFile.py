@@ -8,12 +8,13 @@ from Ganga.GPIDev.Schema import Schema, Version, SimpleItem, ComponentItem
 
 from Ganga.Utility.Config import getConfig
 from Ganga.GPIDev.Base.Proxy import GPIProxyObjectFactory
+from Ganga.GPIDev.Base.Proxy import stripProxy
 from Ganga.Utility import Shell
 from Ganga.Utility.logging import getLogger
-from .IGangaFile import IGangaFile
+from Ganga.GPIDev.Adapters.IGangaFile import IGangaFile
+from Ganga.GPIDev.Base.Proxy import getName
 
-from Ganga.GPIDev.Lib.File import FileUtils
-
+import errno
 import re
 import os
 import copy
@@ -23,22 +24,21 @@ regex = re.compile('[*?\[\]]')
 logger = getLogger()
 
 class MassStorageFile(IGangaFile):
-
     """MassStorageFile represents a class marking a file to be written into mass storage (like Castor at CERN)
     """
     _schema = Schema(Version(1, 1), {'namePattern': SimpleItem(defvalue="", doc='pattern of the file name'),
                                      'localDir': SimpleItem(defvalue="", copyable=1, doc='local dir where the file is stored, used from get and put methods'),
                                      'joboutputdir': SimpleItem(defvalue="", doc='outputdir of the job with which the outputsandbox file object is associated'),
-                                     'locations': SimpleItem(defvalue=[], copyable=1, typelist=['str'], sequence=1, doc="list of locations where the outputfiles are uploaded"),
-                                     'outputfilenameformat': SimpleItem(defvalue=None, typelist=['str', 'type(None)'], protected=0,\
+                                     'locations': SimpleItem(defvalue=[], copyable=1, typelist=[str], sequence=1, doc="list of locations where the outputfiles are uploaded"),
+                                     'outputfilenameformat': SimpleItem(defvalue=None, typelist=[str, None], protected=0,\
                                                     doc="keyword path to where the output should be uploaded, i.e. /some/path/here/{jid}/{sjid}/{fname},\
                                                         if this field is not set, the output will go in {jid}/{sjid}/{fname} or in {jid}/{fname}\
                                                         depending on whether the job is split or not"),
-                                     'inputremotedirectory': SimpleItem(defvalue=None, typelist=['str', 'type(None)'], protected=0, doc="Directory on mass storage where the file is stored"),
-                                     'subfiles': ComponentItem(category='gangafiles', defvalue=[], hidden=1, typelist=['Ganga.GPIDev.Lib.File.MassStorageFile'], sequence=1, copyable=0,\
+                                     'inputremotedirectory': SimpleItem(defvalue=None, typelist=[str, None], protected=0, doc="Directory on mass storage where the file is stored"),
+                                     'subfiles': ComponentItem(category='gangafiles', defvalue=[], hidden=1, sequence=1, copyable=0,\
                                                     doc="collected files from the wildcard namePattern"),
                                      'failureReason': SimpleItem(defvalue="", protected=1, copyable=0, doc='reason for the upload failure'),
-                                     'compressed': SimpleItem(defvalue=False, typelist=['bool'], protected=0, doc='wheather the output file should be compressed before sending somewhere')
+                                     'compressed': SimpleItem(defvalue=False, typelist=[bool], protected=0, doc='wheather the output file should be compressed before sending somewhere')
                                      })
 
     _category = 'gangafiles'
@@ -73,7 +73,7 @@ class MassStorageFile(IGangaFile):
 
     def _on_attribute__set__(self, obj_type, attrib_name):
         r = copy.deepcopy(self)
-        if obj_type.__class__.__name__ == 'Job' and attrib_name == 'outputfiles':
+        if getName(obj_type) == 'Job' and attrib_name == 'outputfiles':
             r.locations = []
             r.localDir = ''
             r.failureReason = ''
@@ -318,7 +318,7 @@ class MassStorageFile(IGangaFile):
                 if exitcode != 0:
                     self.handleUploadFailure(mystderr)
                 else:
-                    logger.info('%s successfully uploaded to mass storage' % currentFile)
+                    logger.info('%s successfully uploaded to mass storage as %s' % (currentFile, os.path.join(massStoragePath, finalFilename)))
                     d.locations = os.path.join(massStoragePath, os.path.basename(finalFilename))
 
                     # Alex removed this as more general approach in job.py after put() is called
@@ -334,7 +334,7 @@ class MassStorageFile(IGangaFile):
             if exitcode != 0:
                 self.handleUploadFailure(mystderr)
             else:
-                logger.info('%s successfully uploaded to mass storage' % currentFile)
+                logger.info('%s successfully uploaded to mass storage as %s' % (currentFile, os.path.join(massStoragePath, finalFilename)))
                 location = os.path.join(massStoragePath, os.path.basename(finalFilename))
                 if location not in self.locations:
                     self.locations.append(location)
@@ -359,7 +359,7 @@ class MassStorageFile(IGangaFile):
 
                 isJob = True
 
-                if (self.getJobObject().splitter != None):
+                if stripProxy(self.getJobObject()).master is not None:
 
                     isSplitJob = True
                     searchFor.append('{sjid}')
@@ -383,8 +383,7 @@ class MassStorageFile(IGangaFile):
                 return (False, 'Error in MassStorageFile.outputfilenameformat field :  no parent job, but {\'jid\'} keyword found')
 
             invalidUnixChars = ['"', ' ']
-            test = self.outputfilenameformat.replace('{jid}', 'a').replace(
-                '{sjid}', 'b').replace('{fname}', 'c')
+            test = self.outputfilenameformat.replace('{jid}', 'a').replace('{sjid}', 'b').replace('{fname}', 'c')
 
             for invalidUnixChar in invalidUnixChars:
                 if test.find(invalidUnixChar) > -1:
@@ -538,7 +537,7 @@ class MassStorageFile(IGangaFile):
                     try:
                         os.rename(_localFile, remove_filename)
                     except OSError as err:
-                        logger.warning("Error in first stage of removing file: %s" % this_file)
+                        logger.warning("Error in first stage of removing file: %s" % remove_filename)
                         remove_filename = _localFile
 
                     try:

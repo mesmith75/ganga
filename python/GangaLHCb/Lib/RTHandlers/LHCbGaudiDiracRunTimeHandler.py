@@ -1,6 +1,7 @@
 import copy
 import os
 import pickle
+from Ganga.Core import BackendError
 from GangaLHCb.Lib.LHCbDataset import LHCbDataset
 from GangaLHCb.Lib.LHCbDataset.OutputData import OutputData
 from GangaGaudi.Lib.RTHandlers.GaudiDiracRunTimeHandler import GaudiDiracRunTimeHandler
@@ -12,7 +13,7 @@ from GangaDirac.Lib.Utilities.DiracUtilities import execute
 from Ganga.GPIDev.Lib.File.OutputFileManager import getOutputSandboxPatterns, getWNCodeForOutputPostprocessing
 from Ganga.GPIDev.Adapters.StandardJobConfig import StandardJobConfig
 from Ganga.GPIDev.Lib.File import FileBuffer, LocalFile
-from Ganga.GPIDev.Base.Proxy import addProxy, isType
+from Ganga.GPIDev.Base.Proxy import addProxy, isType, stripProxy
 from Ganga.Utility.Config import getConfig
 from Ganga.Utility.logging import getLogger
 from Ganga.Utility.util import unique
@@ -25,6 +26,7 @@ class LHCbGaudiDiracRunTimeHandler(GaudiDiracRunTimeHandler):
 
     def master_prepare(self, app, appmasterconfig):
 
+        logger.debug("Master Prepare")
         inputsandbox, outputsandbox = master_sandbox_prepare(app, appmasterconfig, ['inputsandbox'])
 
         # add summary.xml
@@ -37,10 +39,11 @@ class LHCbGaudiDiracRunTimeHandler(GaudiDiracRunTimeHandler):
 
     def prepare(self, app, appsubconfig, appmasterconfig, jobmasterconfig):
 
-        inputsandbox, outputsandbox = sandbox_prepare(
-            app, appsubconfig, appmasterconfig, jobmasterconfig)
+        logger.debug("Prepare")
 
-        job = app.getJobObject()
+        inputsandbox, outputsandbox = sandbox_prepare(app, appsubconfig, appmasterconfig, jobmasterconfig)
+
+        job = stripProxy(app).getJobObject()
 
         if job.inputdata:
             if not job.splitter:
@@ -144,8 +147,7 @@ class LHCbGaudiDiracRunTimeHandler(GaudiDiracRunTimeHandler):
 
             # As the RT Handler we already know we have a Dirac backend
             if type(job.backend.settings) is not dict:
-                raise ApplicationConfigurationError(
-                    None, 'backend.settings should be a dict')
+                raise ApplicationConfigurationError(None, 'backend.settings should be a dict')
 
             if 'AncestorDepth' in job.backend.settings:
                 ancestor_depth = job.backend.settings['AncestorDepth']
@@ -168,10 +170,10 @@ class LHCbGaudiDiracRunTimeHandler(GaudiDiracRunTimeHandler):
                                         DIRAC_OBJECT='DiracLHCb()',
                                         JOB_OBJECT='LHCbJob()',
                                         NAME=mangle_job_name(app),
-                                        APP_NAME=app.appname,
+                                        APP_NAME=stripProxy(app).appname,
                                         APP_VERSION=app.version,
                                         APP_SCRIPT=gaudi_script_path,
-                                        APP_LOG_FILE='Ganga_%s_%s.log' % (app.appname, app.version),
+                                        APP_LOG_FILE='Ganga_%s_%s.log' % (stripProxy(app).appname, app.version),
                                         INPUTDATA=input_data,
                                         PARAMETRIC_INPUTDATA=parametricinput_data,
                                         OUTPUT_SANDBOX=API_nullifier(outputsandbox),

@@ -15,6 +15,7 @@ import os
 import re
 import math
 from collections import defaultdict
+import mimetypes
 
 from Ganga.Core.GangaThread.MTRunner import MTRunner, Data, Algorithm
 from Ganga.Core import GangaException
@@ -24,6 +25,7 @@ from Ganga.GPIDev.Lib.File import FileBuffer
 from Ganga.GPIDev.Adapters.IBackend import IBackend
 from Ganga.GPIDev.Adapters.StandardJobConfig import StandardJobConfig
 import Ganga.Utility.Config
+from Ganga.Utility.Config import getConfig
 from Ganga.Utility.logging import getLogger, log_user_exception
 from Ganga.Utility.util import isStringLike
 from Ganga.Lib.LCG.ElapsedTimeProfiler import ElapsedTimeProfiler
@@ -33,7 +35,7 @@ from Ganga.Utility.logic import implies
 from Ganga.Utility.GridShell import getShell
 
 from Ganga.GPIDev.Credentials2 import VomsProxy, require_credential, credential_store, needed_credentials
-from Ganga.GPIDev.Base.Proxy import isType
+from Ganga.GPIDev.Base.Proxy import isType, getName
 
 try:
     simulator_enabled = os.environ['GANGA_GRID_SIMULATOR']
@@ -182,8 +184,8 @@ class LCG(IBackend):
         'requirements': ComponentItem('LCGRequirements', doc='Requirements for the resource selection'),
         'sandboxcache': ComponentItem('GridSandboxCache', copyable=1, doc='Interface for handling oversized input sandbox'),
         'parent_id': SimpleItem(defvalue='', protected=1, copyable=0, hidden=1, doc='Middleware job identifier for its parent job'),
-        'id': SimpleItem(defvalue='', typelist=['str', 'list'], protected=1, copyable=0, doc='Middleware job identifier'),
-        'status': SimpleItem(defvalue='', typelist=['str', 'dict'], protected=1, copyable=0, doc='Middleware job status'),
+        'id': SimpleItem(defvalue='', typelist=[str, list], protected=1, copyable=0, doc='Middleware job identifier'),
+        'status': SimpleItem(defvalue='', typelist=[str, dict], protected=1, copyable=0, doc='Middleware job status'),
         'exitcode': SimpleItem(defvalue='', protected=1, copyable=0, doc='Application exit code'),
         'exitcode_lcg': SimpleItem(defvalue='', protected=1, copyable=0, doc='Middleware exit code'),
         'reason': SimpleItem(defvalue='', protected=1, copyable=0, doc='Reason of causing the job status'),
@@ -239,9 +241,11 @@ class LCG(IBackend):
         self.sandboxcache.vo = config['VirtualOrganisation']
         self.sandboxcache.timeout = config['SandboxTransferTimeout']
 
-        try:
-            from Ganga.GPI import DQ2SandboxCache
-        except ImportError:
+        # Should this __really__ be in Core?
+        from Ganga.GPIDev.Base.Proxy import getProxyInterface
+        if 'DQ2SandboxCache' in getProxyInterface.__dict__.keys():
+            DQ2SandboxCache = getProxyInterface()['DQ2SandboxCache']
+        else:
             DQ2SandboxCache = None
 
         from Ganga.Lib.LCG.LCGSandboxCache import LCGSandboxCache
@@ -1257,13 +1261,15 @@ try:
         if not lcg_file_download(vo, guid, os.path.join(wdir,f), timeout=int(timeout)):
             raise IOError('Download remote input %s:%s failed.' % (guid,f) )
         else:
-            getPackedInputSandbox(f)
+            if mimetypes.guess_type(f)[1] in ['gzip', 'bzip2']:
+                getPackedInputSandbox(f)
 
     printInfo('Download inputsandbox from iocache passed.')
 
 #   unpack inputsandbox from wdir
     for f in input_sandbox['local']:
-        getPackedInputSandbox(os.path.join(orig_wdir,f))
+        if mimetypes.guess_type(f)[1] in ['gzip', 'bzip2']:
+            getPackedInputSandbox(os.path.join(orig_wdir,f))
 
     printInfo('Unpack inputsandbox passed.')
 
@@ -1424,7 +1430,7 @@ sys.exit(0)
             jobconfig.outputbox + getOutputSandboxPatterns(job)))
 
         script = script.replace(
-            '###APPLICATION_NAME###', job.application._name)
+            '###APPLICATION_NAME###', getName(job.application))
         script = script.replace(
             '###APPLICATIONEXEC###', repr(jobconfig.getExeString()))
         script = script.replace(
@@ -1466,7 +1472,12 @@ sys.exit(0)
 
 
 #       prepare input/output sandboxes
-        packed_files = jobconfig.getSandboxFiles() + Sandbox.getGangaModulesAsSandboxFiles(Sandbox.getDefaultModules())
+        from Ganga.GPIDev.Lib.File import File
+        from Ganga.Core.Sandbox.WNSandbox import PYTHON_DIR
+        import inspect
+
+        fileutils = File( inspect.getsourcefile(Ganga.Utility.files), subdir=PYTHON_DIR )
+        packed_files = jobconfig.getSandboxFiles() + [ fileutils ]
         sandbox_files = job.createPackedInputSandbox(packed_files)
 
         # sandbox of child jobs should include master's sandbox

@@ -4,8 +4,7 @@ from Ganga.Utility.Config import getConfig
 config = getConfig('Configuration')
 #config.addOption('UsageMonitoringURL', "http://gangamon.cern.ch:8888/apmon/ganga.conf",
 #                 'MonALISA configuration file used to setup the destination of usage messages')
-config.addOption('UsageMonitoringMSG', True,
-                 "enable usage monitoring through MSG server defined in MSGMS configuration")
+
 
 monitor = None
 
@@ -33,12 +32,6 @@ def ganga_started(session_type, **extended_attributes):
 
     usage_message.update(extended_attributes)
 
-    #if config['UsageMonitoringURL']:
-    #    from Ganga.GPI import queues
-    #    # Lets move the actual monitoring out of the main thread for some performance
-    #    msg = '%s@%s_%s' % (user, host, start)
-    #    queues.add( _setupMonitor, (config['UsageMonitoringURL'], msg, usage_message) )
-
     if config['UsageMonitoringMSG']:
         from Ganga.GPIDev.MonitoringServices import MSGUtil
         msg_config = getConfig('MSGMS')
@@ -52,7 +45,10 @@ def ganga_started(session_type, **extended_attributes):
         p.send(msg_config['usage_message_destination'], repr(usage_message), {'persistent': 'true'})
         # ask publisher thread to stop. it will send queued message anyway.
         p.stop()
-
+        p._finalize(10.)
+        if hasattr(p, 'unregister'):
+            p.unregister()
+        del p
 
 def ganga_job_submitted(application_name, backend_name, plain_job, master_job, sub_jobs):
     host = getConfig('System')['GANGA_HOSTNAME']
@@ -74,9 +70,13 @@ def ganga_job_submitted(application_name, backend_name, plain_job, master_job, s
 
         # start publisher thread and enqueue usage message for sending
         p.start()
-        p.send(msg_config['job_submission_message_destination'], repr(
-            job_submitted_message), {'persistent': 'true'})
+        p.send(msg_config['job_submission_message_destination'], repr(job_submitted_message), {'persistent': 'true'})
         # p.send('/queue/test.ganga.jobsubmission',repr(job_submitted_message),{'persistent':'true'})
         # ask publisher thread to stop. it will send queued message anyway.
         p.stop()
+        p._finalize(10.)
+        if hasattr(p, 'unregister'):
+            p.unregister()
+        del p
+
 

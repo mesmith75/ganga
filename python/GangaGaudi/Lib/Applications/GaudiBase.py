@@ -164,7 +164,7 @@ class GaudiBase(IPrepareApp):
     def make(self, argument=''):
         """Build the code in the release area the application object points to."""
         from GangaGaudi.Lib.Application.GaudiUtils import make
-        make(self, arguments)
+        make(self, argument)
 
     def projectCMD(self, command):
         """Eecute a given command at the top level of a requested project."""
@@ -172,7 +172,7 @@ class GaudiBase(IPrepareApp):
         execute('%s' % command,
                 shell=True,
                 timeout=None,
-                env=selfg.getenv(False),
+                env=self.getenv(False),
                 cwd=self.user_release_area)
 
     def cmt(self, command):
@@ -264,7 +264,11 @@ class GaudiBase(IPrepareApp):
         if (self.is_prepared is not None) and (force is not True):
             raise Exception('%s application has already been prepared. Use prepare(force=True) to prepare again.' % (getName(self)))
 
-        logger.info('Job %s: Preparing %s application.' % (stripProxy(self).getJobObject().getFQID('.'), getName(self)))
+        try:
+            logger.info('Job %s: Preparing %s application.' % (stripProxy(self).getJobObject().getFQID('.'), getName(self)))
+        except AssertionError, err:
+            ## No Job associated with Object!!
+            logger.info("Preparing %s application." % getName(self))
         self.is_prepared = ShareDir()
 
     def master_configure(self):

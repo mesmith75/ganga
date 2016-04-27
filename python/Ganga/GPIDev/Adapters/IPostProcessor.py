@@ -10,9 +10,6 @@ from Ganga.GPIDev.Schema import Schema, Version, ComponentItem
 from Ganga.GPIDev.Base.Proxy import GPIProxyObjectFactory
 from Ganga.GPIDev.Lib.GangaList.GangaList import GangaList
 
-import Ganga.GPI
-
-
 class PostProcessException(GangaException):
 
     def __init__(self, x=''):
@@ -34,9 +31,6 @@ class IPostProcessor(GangaObject):
 
     def __init__(self):
         super(IPostProcessor, self).__init__()
-
-    def __construct__(self, value):
-        super(IPostProcessor, self).__construct__(value)
 
     def execute(self, job, **options):
         """
@@ -64,24 +58,27 @@ class MultiPostProcessor(IPostProcessor):
     def __init__(self):
         super(MultiPostProcessor, self).__init__()
 
-    def __construct__(self, value):
-        if len(value) == 1 or len(value) > 1 and isType(value, (GangaList,list)):
-            if isinstance(value, list) or isType(value, GangaList):
-                for process in value:
+    def __construct__(self, args):
+        if len(args) == 1 or len(args) > 1 and isType(args, (GangaList, list)):
+            if isinstance(args, list) or isType(args, GangaList):
+                for process in args:
                     self.addProcess(process)
-            elif isType(value, MultiPostProcessor):
-                for process in stripProxy(value).process_objects:
+            elif isType(args, MultiPostProcessor):
+                for process in stripProxy(args).process_objects:
                     self.addProcess(process)
             else:
-                self.addProcess(value)
+                self.addProcess(args)
 
             if hasattr(self.process_objects, 'order'):
                 self.process_objects = sorted(self.process_objects, key=lambda process: process.order)
         else:
-            super(MultiPostProcessor, self).__construct__(value)
+            super(MultiPostProcessor, self).__construct__(args)
 
     def __str__(self):
-        return str(GPIProxyObjectFactory(self.process_objects))
+        if not isType(self.process_objects, GangaObject):
+            return str(self.process_objects)
+        else:
+            return str(GPIProxyObjectFactory(self.process_objects))
 
     def append(self, value):
         self.addProcess(value)
@@ -122,7 +119,7 @@ class MultiPostProcessor(IPostProcessor):
     def __len__(self):
         return len(self.process_objects)
 
-    def printSummaryTree(self, level=0, verbosity_level=0, whitespace_marker='', out=None, selection=''):
+    def printSummaryTree(self, level=0, verbosity_level=0, whitespace_marker='', out=None, selection='', interactive=False):
         """If this method is overridden, the following should be noted:
 
         level: the hierachy level we are currently at in the object tree.
@@ -145,16 +142,21 @@ def postprocessor_filter(value, item):
 
     #from Ganga.GPIDev.Base.Proxy import stripProxy
 
-    valid_jobtypes = [stripProxy(i)._schema.datadict['postprocessors'] for i in Ganga.GPI.__dict__.values()
+    from Ganga.GPIDev.Base.Proxy import getProxyInterface
+
+    valid_jobtypes = [stripProxy(i)._schema.datadict['postprocessors'] for i in getProxyInterface().__dict__.values()
                       if isinstance(stripProxy(i), ObjectMetaclass)
                       and (issubclass(stripProxy(i), Job) or issubclass(stripProxy(i), ITransform))
                       and 'postprocessors' in stripProxy(i)._schema.datadict]
 
- # Alex modified this line to that from above to allow for arbitrary dynamic LHCbJobTemplate etc types
+    # Alex modified this line to that from above to allow for arbitrary dynamic LHCbJobTemplate etc types
 #    if item is Job._schema['postprocessors']:
     if item in valid_jobtypes:
         ds = MultiPostProcessor()
-        ds.__construct__(value)
+        if isinstance(value, list) or isType(value, GangaList):
+            ds.__construct__(value)
+        else:
+            ds.__construct__([value])
         return ds
     else:
         raise PostProcessException(

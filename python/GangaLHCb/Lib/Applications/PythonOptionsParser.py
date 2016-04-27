@@ -6,6 +6,7 @@ import tempfile
 import fnmatch
 from Ganga.GPIDev.Base.Proxy import stripProxy, getName
 from Ganga.GPIDev.Lib.File import FileBuffer
+from Ganga.GPIDev.Lib.File import LocalFile
 import Ganga.Utility.logging
 from Ganga.Utility.util import unique
 import Ganga.Utility.Config
@@ -18,8 +19,11 @@ logger = Ganga.Utility.logging.getLogger()
 
 #\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\#
 
+## Due to a bug in Gaudi at some point we need this equivalenc here: see #204
+DataObjectDescriptorCollection = str
 
 class PythonOptionsParser:
+
 
     """ Parses job options file(s) w/ gaudirun.py to extract user's files"""
 

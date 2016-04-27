@@ -17,11 +17,10 @@ import Ganga.Utility.logging
 logger = Ganga.Utility.logging.getLogger()
 
 
-from Ganga.Utility.Config import makeConfig, getConfig
+from Ganga.Utility.Config import getConfig
 from Ganga.Utility.files import expandfilename
-config = makeConfig('Preparable', 'Parameters for preparable applications')
-config.addOption('unprepare_on_copy', False, 'Unprepare a prepared application when it is copied')
 
+config = getConfig("Preparable")
 
 class IPrepareApp(IApplication):
 
@@ -29,25 +28,13 @@ class IPrepareApp(IApplication):
     Base class for all applications which can be placed into a prepared\
     state. 
     """
-    _schema = Schema(Version(0, 0), {'hash': SimpleItem(
-        defvalue=None, typelist=['type(None)', 'str'], hidden=1)})
+    _schema = Schema(Version(0, 0), {'hash': SimpleItem(defvalue=None, typelist=[None, str], hidden=1)})
     _category = 'applications'
     _name = 'PrepareApp'
     _hidden = 1
 
-#    def _readonly(self):
-#        """An application is read-only once it has been prepared."""
-#        if self.is_prepared is None:
-#            return 0
-#        else:
-#            logger.error("Cannot modify a prepared application's attributes. First unprepare() the application.")
-#            return 1
-
     def __init__(self):
         super(IPrepareApp, self).__init__()
-
-    def __construct__(self, args):
-        super(IPrepareApp, self).__construct__(args)
 
     def _auto__init__(self, unprepare=None):
         if unprepare is True:
@@ -111,7 +98,7 @@ class IPrepareApp(IApplication):
                                 if not os.path.isidr(shr_dir):
                                     os.makedirs(shr_dir)
                                 shutil.copy2(subitem, shr_dir)
-                                logger.debug("Copying into: %s" % str(shr_dir))
+                                logger.debug("Copying into: %s" % shr_dir)
                             except IOError as e:
                                 logger.error(e)
                                 return 0
@@ -121,7 +108,7 @@ class IPrepareApp(IApplication):
                             shr_dir = os.path.join(shared_path, self.is_prepared.name)
                             if not os.path.isdir(shr_dir):
                                 os.makedirs(shr_dir)
-                                logger.debug("Copying into: %s" % str(shr_dir))
+                                logger.debug("Copying into: %s" % shr_dir)
                             shutil.copy2(subitem.name, shr_dir)
                         except IOError as e:
                             logger.error(e)
@@ -136,7 +123,7 @@ class IPrepareApp(IApplication):
                         shr_dir = os.path.join(shared_path, self.is_prepared.name)
                         if not os.path.isdir(shr_dir):
                             os.makedirs(shr_dir)
-                        logger.debug("Copying into: %s" % str(shr_dir))
+                        logger.debug("Copying into: %s" % shr_dir)
                         shutil.copy2(prepitem, shr_dir)
                     except IOError as e:
                         logger.error(e)
@@ -148,7 +135,7 @@ class IPrepareApp(IApplication):
                     shr_dir = os.path.join(shared_path, self.is_prepared.name)
                     if not os.path.isdir(shr_dir):
                         os.makedirs(shr_dir)
-                    logger.debug("Copying into: %s" % str(shr_dir))
+                    logger.debug("Copying into: %s" % shr_dir)
                     shutil.copy2(prepitem.name, shr_dir)
                 except IOError as e:
                     logger.error(e)
@@ -170,7 +157,7 @@ class IPrepareApp(IApplication):
             import hashlib
             digest = hashlib.new('md5')
         except Exception as err:
-            logger.debug("Err: %s" % str(err))
+            logger.debug("Err: %s" % err)
             import md5
             digest = md5.new()
 
@@ -217,3 +204,4 @@ class IPrepareApp(IApplication):
             # logger.error(self.listShareDirContents(prepared_object.is_prepared.name))
         else:
             self.incrementShareCounter(prepared_object.is_prepared.name)
+

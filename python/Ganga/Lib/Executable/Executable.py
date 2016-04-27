@@ -10,12 +10,13 @@ from Ganga.GPIDev.Schema import Schema, Version, SimpleItem
 
 from Ganga.Utility.Config import getConfig
 
-from Ganga.GPIDev.Lib.File import File, ShareDir
+from Ganga.GPIDev.Lib.File import ShareDir
+from Ganga.GPIDev.Lib.File.File import File
 from Ganga.Core import ApplicationConfigurationError, ApplicationPrepareError
 
 from Ganga.Utility.logging import getLogger
 
-from Ganga.GPIDev.Base.Proxy import getName, isType
+from Ganga.GPIDev.Base.Proxy import getName, isType, stripProxy
 
 import os
 import shutil
@@ -51,11 +52,11 @@ class Executable(IPrepareApp):
 
     """
     _schema = Schema(Version(2, 0), {
-        'exe': SimpleItem(preparable=1, defvalue='echo', typelist=['str', 'Ganga.GPIDev.Lib.File.File.File'], comparable=1, doc='A path (string) or a File object specifying an executable.'),
-        'args': SimpleItem(defvalue=["Hello World"], typelist=['str', 'Ganga.GPIDev.Lib.File.File.File', 'int'], sequence=1, strict_sequence=0, doc="List of arguments for the executable. Arguments may be strings, numerics or File objects."),
-        'env': SimpleItem(defvalue={}, typelist=['str'], doc='Dictionary of environment variables that will be replaced in the running environment.'),
-       'is_prepared': SimpleItem(defvalue=None, strict_sequence=0, visitable=1, copyable=1, hidden=0, typelist=['type(None)', 'bool', ShareDir], protected=1, comparable=1, doc='Location of shared resources. Presence of this attribute implies the application has been prepared.'),
-        'hash': SimpleItem(defvalue=None, typelist=['type(None)', 'str'], hidden=0, doc='MD5 hash of the string representation of applications preparable attributes')
+        'exe': SimpleItem(preparable=1, defvalue='echo', typelist=[str, File], comparable=1, doc='A path (string) or a File object specifying an executable.'),
+        'args': SimpleItem(defvalue=["Hello World"], typelist=[str, File, int], sequence=1, strict_sequence=0, doc="List of arguments for the executable. Arguments may be strings, numerics or File objects."),
+        'env': SimpleItem(defvalue={}, typelist=[str], doc='Dictionary of environment variables that will be replaced in the running environment.'),
+       'is_prepared': SimpleItem(defvalue=None, strict_sequence=0, visitable=1, copyable=1, hidden=0, typelist=[None, bool, ShareDir], protected=0, comparable=1, doc='Location of shared resources. Presence of this attribute implies the application has been prepared.'),
+        'hash': SimpleItem(defvalue=None, typelist=[None, str], hidden=0, doc='MD5 hash of the string representation of applications preparable attributes')
     })
     _category = 'applications'
     _name = 'Executable'
@@ -63,9 +64,6 @@ class Executable(IPrepareApp):
 
     def __init__(self):
         super(Executable, self).__init__()
-
-    def __construct__(self, args):
-        super(Executable, self).__construct__(args)
 
     def __deepcopy__(self, memo):
         return super(Executable, self).__deepcopy__(memo)
@@ -104,7 +102,7 @@ class Executable(IPrepareApp):
         """
 
         if (self.is_prepared is not None) and (force is not True):
-            raise ApplicationPrepareError('%s application has already been prepared. Use prepare(force=True) to prepare again.' % (self._name))
+            raise ApplicationPrepareError('%s application has already been prepared. Use prepare(force=True) to prepare again.' % getName(self))
 
         # lets use the same criteria as the configure() method for checking file existence & sanity
         # this will bail us out of prepare if there's somthing odd with the job config - like the executable
@@ -240,8 +238,7 @@ class RTHandler(IRuntimeHandler):
                 prepared_exe = File(os.path.join(
                     os.path.join(shared_path, app.is_prepared.name), os.path.basename(app.exe.name)))
 
-        c = StandardJobConfig(prepared_exe, app._getParent().inputsandbox, convertIntToStringArgs(
-            app.args), app._getParent().outputsandbox)
+        c = StandardJobConfig(prepared_exe, stripProxy(app).getJobObject().inputsandbox, convertIntToStringArgs(app.args), stripProxy(app).getJobObject().outputsandbox)
         return c
 
 

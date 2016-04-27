@@ -4,6 +4,7 @@ import os.path
 import math
 import re
 from collections import defaultdict
+import mimetypes
 
 from urlparse import urlparse
 
@@ -16,6 +17,7 @@ from Ganga.GPIDev.Adapters.IBackend import IBackend
 from Ganga.Utility.Config import getConfig
 from Ganga.Utility.logging import getLogger, log_user_exception
 from Ganga.Utility.logic import implies
+from Ganga.Lib.LCG.Utility import get_uuid
 from Ganga.Lib.LCG.Utility import get_md5sum
 from Ganga.Lib.LCG.ElapsedTimeProfiler import ElapsedTimeProfiler
 
@@ -23,7 +25,9 @@ from . import Grid
 from Ganga.Lib.LCG.GridftpSandboxCache import GridftpSandboxCache
 
 from Ganga.GPIDev.Credentials2 import VomsProxy, require_credential, credential_store, needed_credentials
+from Ganga.GPIDev.Base.Proxy import getName
 
+config = getConfig('LCG')
 
 def __cream_resolveOSBList__(job, jdl):
 
@@ -56,8 +60,8 @@ class CREAM(IBackend):
         'jobtype': SimpleItem(defvalue='Normal', doc='Job type: Normal, MPICH'),
         'requirements': ComponentItem('LCGRequirements', doc='Requirements for the resource selection'),
         'sandboxcache': ComponentItem('GridSandboxCache', copyable=1, doc='Interface for handling oversized input sandbox'),
-        'id': SimpleItem(defvalue='', typelist=['str', 'list'], protected=1, copyable=0, doc='Middleware job identifier'),
-        'status': SimpleItem(defvalue='', typelist=['str', 'dict'], protected=1, copyable=0, doc='Middleware job status'),
+        'id': SimpleItem(defvalue='', typelist=[str, list], protected=1, copyable=0, doc='Middleware job identifier'),
+        'status': SimpleItem(defvalue='', typelist=[str, dict], protected=1, copyable=0, doc='Middleware job status'),
         'exitcode': SimpleItem(defvalue='', protected=1, copyable=0, doc='Application exit code'),
         'exitcode_cream': SimpleItem(defvalue='', protected=1, copyable=0, doc='Middleware exit code'),
         'actualCE': SimpleItem(defvalue='', protected=1, copyable=0, doc='The CREAM CE where the job actually runs.'),
@@ -609,13 +613,15 @@ try:
         if not lcg_file_download(vo, guid, os.path.join(wdir,f), timeout=int(timeout)):
             raise IOError('Download remote input %s:%s failed.' % (guid,f) )
         else:
-            getPackedInputSandbox(f)
+            if mimetypes.guess_type(f)[1] in ['gzip', 'bzip2']:
+                getPackedInputSandbox(f)
 
     printInfo('Download inputsandbox from iocache passed.')
 
 #   unpack inputsandbox from wdir
     for f in input_sandbox['local']:
-        getPackedInputSandbox(os.path.join(orig_wdir,f))
+        if mimetypes.guess_type(f)[1] in ['gzip', 'bzip2']:
+            getPackedInputSandbox(os.path.join(orig_wdir,f))
 
     printInfo('Unpack inputsandbox passed.')
 
@@ -744,7 +750,7 @@ sys.exit(0)
             '###OUTPUTSANDBOX###', repr(jobconfig.outputbox))
 
         script = script.replace(
-            '###APPLICATION_NAME###', job.application._name)
+            '###APPLICATION_NAME###', getName(job.application))
         script = script.replace(
             '###APPLICATIONEXEC###', repr(jobconfig.getExeString()))
         script = script.replace(
@@ -785,7 +791,12 @@ sys.exit(0)
             pass
 
 #       prepare input/output sandboxes
-        packed_files = jobconfig.getSandboxFiles() + Sandbox.getGangaModulesAsSandboxFiles(Sandbox.getDefaultModules())
+        from Ganga.GPIDev.Lib.File import File
+        from Ganga.Core.Sandbox.WNSandbox import PYTHON_DIR
+        import inspect
+
+        fileutils = File( inspect.getsourcefile(Ganga.Utility.files), subdir=PYTHON_DIR )
+        packed_files = jobconfig.getSandboxFiles() + [ fileutils ]
         sandbox_files = job.createPackedInputSandbox(packed_files)
 
         # sandbox of child jobs should include master's sandbox
@@ -1322,12 +1333,3 @@ sys.exit(0)
 
 logger = getLogger()
 
-config = getConfig('LCG')
-
-# add CREAM specific configuration options
-config.addOption('CreamInputSandboxBaseURI', '',
-                 'sets the baseURI for getting the input sandboxes for the job')
-config.addOption('CreamOutputSandboxBaseURI', '',
-                 'sets the baseURI for putting the output sandboxes for the job')
-#config.addOption('CreamPrologue','','sets the prologue script')
-#config.addOption('CreamEpilogue','','sets the epilogue script')

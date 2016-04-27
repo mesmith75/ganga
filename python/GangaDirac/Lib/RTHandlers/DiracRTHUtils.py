@@ -1,17 +1,18 @@
 from Ganga.Core.exceptions import BackendError, ApplicationConfigurationError
+from Ganga.Core.exceptions import SplitterError
 from Ganga.Utility.logging import getLogger
 from Ganga.Utility.Config import getConfig
 from Ganga.Utility.util import unique
 from GangaDirac.Lib.Splitters.SplitterUtils import DiracSplitter
 from GangaDirac.Lib.Files.DiracFile import DiracFile
-from Ganga.GPIDev.Base.Proxy import isType, getName
+from Ganga.GPIDev.Base.Proxy import isType, getName, stripProxy
 logger = getLogger()
 
 #\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\/\#
 
 
 def mangle_job_name(app):
-    job = app.getJobObject()
+    job = stripProxy(app).getJobObject()
 
     jobName = job.name
     jobIndex = job.getStringFQID()
@@ -76,8 +77,8 @@ j.setOutputData(###OUTPUTDATA###, outputPath='###OUTPUT_PATH###', outputSE=###OU
     return total_JDL
 
 
-def dirac_inputdata(app):
-    job = app.getJobObject()
+def dirac_inputdata(app, hasOtherInputData=False):
+    job = stripProxy(app).getJobObject()
     input_data = None
     parametricinput_data = None
 
@@ -114,7 +115,7 @@ def dirac_inputdata(app):
         else:
             input_data = job.inputdata.getLFNs()
 
-    elif 'Destination' not in job.backend.settings and not has_input_DiracFile:
+    elif 'Destination' not in job.backend.settings and not has_input_DiracFile and not hasOtherInputData:
         ##THIS IS NOT VERY DIRAC CENTRIC
         ##PLEASE WHEN TIME MOVE TO LHCBDIRAC where T1 is more applicable rcurrie
         ##Also editing the settings on the fly is asking for potential problems, should avoid
@@ -184,7 +185,7 @@ def diracAPI_script_template():
 
 
 def diracAPI_script_settings(app):
-    job = app.getJobObject()
+    job = stripProxy(app).getJobObject()
     diracAPI_line = ''
     if type(job.backend.settings) is not dict:
         raise ApplicationConfigurationError(
@@ -194,7 +195,7 @@ def diracAPI_script_settings(app):
             _setting = str(setting)[3:]
         else:
             _setting = str(setting)
-        if type(setting_val) == type(''):
+        if type(setting_val) is str:
             setting_line = 'j.set###SETTING###("###VALUE###")\n'
         else:
             setting_line = 'j.set###SETTING###(###VALUE###)\n'

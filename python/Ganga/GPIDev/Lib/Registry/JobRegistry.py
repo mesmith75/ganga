@@ -8,13 +8,14 @@ from __future__ import absolute_import
 #from Ganga.Utility.external.ordereddict import oDict
 from Ganga.Utility.external.OrderedDict import OrderedDict as oDict
 
-from Ganga.Core.GangaRepository.Registry import Registry, RegistryKeyError, RegistryAccessError
+from Ganga.Core.exceptions import GangaException
+from Ganga.Core.GangaRepository.Registry import Registry, RegistryKeyError, RegistryAccessError, RegistryFlusher
 
-from Ganga.GPIDev.Base.Proxy import stripProxy
+from Ganga.GPIDev.Base.Proxy import stripProxy, isType, addProxy
 
 import Ganga.Utility.logging
 
-from Ganga.Runtime.GPIexport import exportToGPI
+from Ganga.GPIDev.Lib.Job.Job import Job
 
 from .RegistrySlice import RegistrySlice
 
@@ -22,33 +23,7 @@ from .RegistrySliceProxy import RegistrySliceProxy, _wrap, _unwrap
 
 # display default values for job list
 from .RegistrySlice import config
-config.addOption('jobs_columns',
-                 ("fqid", "status", "name", "subjobs", "application",
-                  "backend", "backend.actualCE", "comment"),
-                 'list of job attributes to be printed in separate columns')
 
-config.addOption('jobs_columns_width',
-                 {'fqid': 8, 'status': 10, 'name': 10, 'subjobs': 8, 'application':
-                     15, 'backend': 15, 'backend.actualCE': 45, 'comment': 30},
-                 'width of each column')
-
-config.addOption('jobs_columns_functions',
-                 {'subjobs': "lambda j: len(j.subjobs)", 'application': "lambda j: j.application._name",
-                  'backend': "lambda j:j.backend._name", 'comment': "lambda j: j.comment"},
-                 'optional converter functions')
-
-config.addOption('jobs_columns_show_empty',
-                 ['fqid'],
-                 'with exception of columns mentioned here, hide all values which evaluate to logical false (so 0,"",[],...)')
-
-config.addOption('jobs_status_colours',
-                 {'new': 'fx.normal',
-                  'submitted': 'fg.orange',
-                  'running': 'fg.green',
-                  'completed': 'fg.blue',
-                  'failed': 'fg.red'
-                  },
-                 'colours for jobs status')
 logger = Ganga.Utility.logging.getLogger()
 
 
@@ -56,20 +31,24 @@ class JobRegistry(Registry):
 
     def __init__(self, name, doc, dirty_flush_counter=10, update_index_time=30, dirty_max_timeout=60, dirty_min_timeout=30):
         super(JobRegistry, self).__init__(name, doc, dirty_flush_counter, update_index_time, dirty_max_timeout, dirty_min_timeout)
+        self.stored_slice = JobRegistrySlice(self.name)
+        self.stored_slice.objects = self
+        self.stored_proxy = JobRegistrySliceProxy(self.stored_slice)
+
+    def getSlice(self):
+        return self.stored_slice
 
     def getProxy(self):
-        this_slice = JobRegistrySlice(self.name)
-        this_slice.objects = self
-        return JobRegistrySliceProxy(this_slice)
+        return self.stored_proxy
 
     def getIndexCache(self, obj):
-        #if not obj.getNodeData():
-        #    return None
+
         cached_values = ['status', 'id', 'name']
         cache = {}
         for cv in cached_values:
-            if cv in obj.getNodeData():
-                cache[cv] = obj.getNodeAttribute(cv)
+            #print("cv: %s" % str(cv))
+            cache[cv] = getattr(obj, cv)
+            #logger.info("Setting: %s = %s" % (str(cv), str(cache[cv])))
         this_slice = JobRegistrySlice("jobs")
         for dpv in this_slice._display_columns:
             #logger.debug("Storing: %s" % str(dpv))
@@ -102,6 +81,12 @@ class JobRegistry(Registry):
             stripProxy(jt)._setRegistry(self.metadata)
             self.metadata._add(jt)
         self.jobtree = self.metadata[self.metadata.ids()[-1]]
+        self.flush_thread = RegistryFlusher(self)
+        self.flush_thread.start()
+
+    def shutdown(self):
+        self.flush_thread.join()
+        super(JobRegistry, self).shutdown()
 
     def getJobTree(self):
         return self.jobtree
@@ -133,7 +118,25 @@ class JobRegistrySlice(RegistrySlice):
         self._proxyClass = JobRegistrySliceProxy
 
     def _getColour(self, obj):
-        return self.status_colours.get(obj.status, self.fx.normal)
+        if isType(obj, Job):
+            from Ganga.GPIDev.Lib.Job.Job import lazyLoadJobStatus
+            status_attr = lazyLoadJobStatus(stripProxy(obj))
+        elif isType(obj, str):
+            status_attr = obj
+        elif isType(obj, dict):
+            if 'display:status' in obj.keys():
+                status_attr = obj['display:status']
+            elif 'status' in obj.keys():
+                status_attr = obj['status']
+            else:
+                status_attr = None
+        else:
+            status_attr = obj
+        try:
+            returnable = self.status_colours.get(status_attr, self.fx.normal)
+        except Exception:
+            returnable = self.status_colours.get(self.fx.normal)
+        return returnable
 
     def __call__(self, id):
         """ Retrieve a job by id.
@@ -142,7 +145,7 @@ class JobRegistrySlice(RegistrySlice):
         t = type(this_id)
         if t is int:
             try:
-                return self.objects[this_id]
+                return _wrap(self.objects[this_id])
             except KeyError:
                 if self.name == 'templates':
                     raise RegistryKeyError('Template %d not found' % this_id)
@@ -153,7 +156,7 @@ class JobRegistrySlice(RegistrySlice):
         elif t is str:
             if this_id.isdigit():
                 try:
-                    return self.objects[int(this_id)]
+                    return _wrap(self.objects[int(this_id)])
                 except KeyError:
                     if self.name == 'templates':
                         raise RegistryKeyError('Template %d not found' % this_id)
@@ -165,7 +168,7 @@ class JobRegistrySlice(RegistrySlice):
                 import fnmatch
                 jlist = [j for j in self.objects if fnmatch.fnmatch(j.name, this_id)]
                 if len(jlist) == 1:
-                    return jlist[0]
+                    return _wrap(jlist[0])
                 return jobSlice(jlist)
         else:
             raise RegistryAccessError('Expected a job id: int, (int,int), or "int.int"')
@@ -190,11 +193,11 @@ class JobRegistrySlice(RegistrySlice):
 
         if len(ids) > 1:
             try:
-                return j.subjobs[ids[1]]
+                return _wrap(j.subjobs[ids[1]])
             except IndexError:
                 raise RegistryKeyError('Subjob %s not found' % ('.'.join([str(_id) for _id in ids])))
         else:
-            return j
+            return _wrap(j)
 
     def submit(self, keep_going):
         self.do_collective_operation(keep_going, 'submit')
@@ -204,10 +207,6 @@ class JobRegistrySlice(RegistrySlice):
 
     def resubmit(self, keep_going):
         self.do_collective_operation(keep_going, 'resubmit')
-
-    def fail(self, keep_going, force):
-        raise GangaException(
-            'fail() is deprecated, use force_status("failed") instead')
 
     def force_status(self, status, keep_going, force):
         self.do_collective_operation(
@@ -275,7 +274,7 @@ class JobRegistrySliceProxy(RegistrySliceProxy):
         jobs((10,2)) : get subjobs number 2 of job 10 if exist or raise exception.
         jobs('10.2')) : same as above
         """
-        return _wrap(stripProxy(self).__call__(x))
+        return stripProxy(self).__call__(x)
 
     def __getslice__(self, i1, i2):
         """ Get a slice. Examples:
@@ -299,6 +298,5 @@ def jobSlice(joblist):
     this_slice.objects = oDict([(j.fqid, _unwrap(j)) for j in joblist])
     return _wrap(this_slice)
 
-# , "Create a job slice from a job list")
-exportToGPI("jobSlice", jobSlice, "Functions")
+# , "Create a job slice from a job list") exported to the Runtime bootstrap
 

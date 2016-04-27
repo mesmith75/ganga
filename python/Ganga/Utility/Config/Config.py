@@ -113,10 +113,11 @@ class ConfigError(GangaException):
 
 logger = None
 
-import Ganga.Utility.logging
+
 
 
 def getLogger():
+    import Ganga.Utility.logging
     global logger
     if logger is not None:
         return logger
@@ -174,18 +175,35 @@ def _migrate_name(name):
     return translated_names[name]
 
 
-def getConfig(name):
-    """ Get an exisiting PackageConfig or create a new one if needed.
+def getConfig(name, create=True):
+    """
+    Get an exisiting PackageConfig or create a new one if needed.
     Temporary name migration conversion applies -- see _migrate_name().
     Principle is the same as for getLogger() -- the config instances may
-    be easily shared between different parts of the program."""
+    be easily shared between different parts of the program.
+
+    Args:
+        name: the name of the config section
+        create (bool): should the section be created if it does not yet exist
+
+    Returns:
+        PackageConfig:
+
+    Raises:
+        KeyError: if the config is not found and ``create`` was False
+    """
+    # FIXME: In future ``create`` should always be False and the function should be simplified to return ``return allConfigs[name]``
 
     name = _migrate_name(name)
     if name in allConfigs:
         return allConfigs[name]
     else:
-        allConfigs[name] = PackageConfig(name, 'Documentation not available')
-        return allConfigs[name]
+        if create:
+            logger.debug('Creating "%s" config in getConfig', name)
+            allConfigs[name] = PackageConfig(name, 'Documentation not available')
+            return allConfigs[name]
+        else:
+            raise KeyError('Config section "{0}" not found'.format(name))
 
 
 def makeConfig(name, docstring, **kwds):
@@ -240,6 +258,7 @@ class ConfigOption(object):
         self.examples = None
         self.filter = None
         self.typelist = None
+        self._hasModified = False
 
     def defineOption(self, default_value, docstring, **meta):
 
@@ -257,7 +276,16 @@ class ConfigOption(object):
         self.convert_type('session_value')
         self.convert_type('user_value')
 
+    def setModified(self, val):
+        self._hasModified = val
+
+    def hasModified(self):
+        return self._hasModified
+
     def setSessionValue(self, session_value):
+
+        self.setModified(True)
+
         # try:
         if self.filter:
             session_value = self.filter(self, session_value)
@@ -281,6 +309,7 @@ class ConfigOption(object):
 
     def setUserValue(self, user_value):
 
+        self.setModified(True)
         try:
             if self.filter:
                 user_value = self.filter(self, user_value)
@@ -310,6 +339,7 @@ class ConfigOption(object):
             raise x
 
     def overrideDefaultValue(self, default_value):
+        self.setModified(True)
         if hasattr(self, 'default_value'):
             default_value = self.transform_PATH_option(default_value, self.default_value)
         else:
@@ -347,6 +377,7 @@ class ConfigOption(object):
             raise AttributeError('Cannot set "%s" attribute of the option object' % name)
         else:
             self.__dict__[name] = value
+            self.__dict__['_hasModified'] = True
 
     def check_defined(self):
         return hasattr(self, 'default_value')
@@ -478,6 +509,14 @@ class PackageConfig(object):
             logger = getLogger()
             logger.error('cannot define open configuration section %s after configure() step', self.name)
 
+        self._hasModified = False
+
+    def setModified(self, val):
+        self._hasModified = val
+                               
+    def hasModified(self):
+        return self._hasModified
+
     def _addOpenOption(self, name, value):
         self.addOption(name, value, "", override=True)
 
@@ -525,7 +564,7 @@ class PackageConfig(object):
             try:
                 option.setSessionValue(session_value)
                 del conf_value[option.name]
-            except Exception, err:
+            except Exception as err:
                 msg = "Error Setting Session Value: %s" % str(err)
                 if 'logger' in locals().keys() and logger is not None:
                     logger.debug("dbg: %s"%msg)
@@ -549,6 +588,8 @@ class PackageConfig(object):
         default).  The special treatment  applies to the session level
         values only (and not the default one!).  """
 
+        self.setModified(True)
+
         logger = getLogger()
 
         logger.debug('trying to set session option [%s]%s = %s', self.name, name, value)
@@ -567,9 +608,14 @@ class PackageConfig(object):
             try:
                 h[1](name, value)
             except Exception as err:
+                import traceback
+                traceback.print_stack()
+                logger.error("h[1]: %s" % str(h[1]))
                 logger.error("Error in Setting Session Value!")
                 logger.error("Name: %s Value: '%s'" % (str(name), str(value)))
                 logger.error("Err:\n%s" % str(err))
+                raise err
+            finally:
                 pass
 
     def setUserValue(self, name, value):
@@ -577,6 +623,8 @@ class PackageConfig(object):
         action so  the value of  the option is considered  'modified' If
         the  default  type  of  the  option  is  not  string,  then  the
         expression will be evaluated. """
+
+        self.setModified(True)
 
         logger = getLogger()
 
@@ -593,9 +641,11 @@ class PackageConfig(object):
             handler[1](name, value)
 
     def overrideDefaultValue(self, name, val):
+        self.setModified(True)
         self.options[name].overrideDefaultValue(val)
 
     def revertToSession(self, name):
+        self.setModified(True)
         if name in self.options:
             if hasattr(self.options[name], 'user_value'):
                 del self.options[name].user_value
@@ -605,6 +655,7 @@ class PackageConfig(object):
             pass
 
     def revertToDefault(self, name):
+        self.setModified(True)
         self.revertToSession(name)
         if name in self.options:
             if hasattr(self.options[name], 'session_value'):
@@ -615,10 +666,12 @@ class PackageConfig(object):
             pass
 
     def revertToSessionOptions(self):
+        self.setModified(True)
         for name in self.options:
             self.revertToSession(name)
 
     def revertToDefaultOptions(self):
+        self.setModified(True)
         self.revertToSessionOptions()
         for name in self.options:
             self.revertToDefault(name)
@@ -633,11 +686,11 @@ class PackageConfig(object):
         if name in self.options:
             return self.options[name].value
         else:
-            logger = getLogger()
-            logger.debug("Effective Option %s NOT FOUND, Effective Options are:" % (name))
+            #logger = getLogger()
+            #logger.debug("Effective Option %s NOT FOUND, Effective Options are:" % (name))
             opts = self.getEffectiveOptions()
-            for k, v in opts.iteritems():
-                logger.debug("\n\t%s:%s" % (str(k), str(v)))
+            #for k, v in opts.iteritems():
+            #    logger.debug("\n\t%s:%s" % (str(k), str(v)))
             raise ConfigError('option "%s" does not exist in "%s"' % (name, self.name))
 
     def getEffectiveLevel(self, name):
@@ -646,7 +699,7 @@ class PackageConfig(object):
         if name in self.options:
             return self.options[name].level
         else:
-            raise ConfigError('option "%s" does not exist in "%s"' % (x, self.name))
+            raise ConfigError('option "%s" does not exist in "%s"' % (name, self.name))
 
     def attachUserHandler(self, pre, post):
         """ Attach a user handler:
@@ -761,6 +814,8 @@ def read_ini_files(filenames, system_vars):
 
     import re
     import os
+    import Ganga.Utility.logging
+
     logger = getLogger()
 
     logger.debug('reading ini files: %s', str(filenames))
@@ -800,7 +855,7 @@ def read_ini_files(filenames, system_vars):
                     localvarstripped = re.sub(r'[^\w]', '', localvar.group(0))
                     try:
                         value = value.replace(localvar.group(0), cc.get(sec, localvarstripped))
-                    except Exception, err:
+                    except Exception as err:
                         Ganga.Utility.logging.log_unknown_exception()
                         logger.debug('The variable \"' + localvarstripped + '\" is referenced but not defined in the ')
                         logger.debug('[' + sec + '] configuration section of ' + f)
@@ -857,7 +912,7 @@ def read_ini_files(filenames, system_vars):
                     logger.debug("Error Setting %s" % str(err))
                     try:
                         main.set(sec, name, value)
-                    except Exception, err2:
+                    except Exception as err2:
                         logger.debug("Error setting #2: %s" % str(err2))
                         raise err
 
@@ -938,7 +993,7 @@ def load_user_config(filename, system_vars):
                 v = new_cfg.get(name, o)
             except (ConfigParser.InterpolationMissingOptionError, ConfigParser.InterpolationSyntaxError) as err:
                 logger.debug("Parse Error!:\n  %s" % str(err))
-                logging.debug("Failed to expand %s:%s, loading it as raw" % (str(name), str(o)))
+                logger.debug("Failed to expand %s:%s, loading it as raw" % (str(name), str(o)))
                 v = new_cfg.get(name, o, raw=True)
             current_cfg_section.setUserValue(o, v)
 

@@ -106,6 +106,7 @@ class DiracBase(IBackend):
 
         from Ganga.GPIDev.Lib.Job.Job import Job
         master_job = self.getJobObject()
+        master_job.subjobs = []
         for i in range(len(dirac_ids)):
             j = Job()
             j.copyFrom(master_job)
@@ -288,7 +289,7 @@ class DiracBase(IBackend):
                 _key = key[3:]
             else:
                 _key = key
-            if type(value) == type(''):
+            if type(value) is str:
                 template = '%s.set%s("%s")\n'
             else:
                 template = '%s.set%s(%s)\n'
@@ -706,12 +707,12 @@ class DiracBase(IBackend):
         logger.debug('Monitor jobs    : ' + repr([j.fqid for j in monitor_jobs]))
         logger.debug('Requeue jobs    : ' + repr([j.fqid for j in requeue_jobs]))
 
-        from Ganga.GPI import queues
+        from Ganga.Core.GangaThread.WorkerThreads import getQueues
 
         # requeue existing completed job
         for j in requeue_jobs:
             #            if j.backend.status in requeue_dirac_status:
-            queues._monitoring_threadpool.add_function(DiracBase.job_finalisation,
+            getQueues()._monitoring_threadpool.add_function(DiracBase.job_finalisation,
                                                        args=(j, requeue_dirac_status[j.backend.status]),
                                                        priority=5, name="Job %s Finalizing" % j.fqid)
             j.been_queued = True
@@ -787,7 +788,7 @@ class DiracBase(IBackend):
                     if job.master:
                         job.master.updateMasterJobStatus()
 
-                queues._monitoring_threadpool.add_function(DiracBase.job_finalisation,
+                getQueues()._monitoring_threadpool.add_function(DiracBase.job_finalisation,
                                                            args=(job, updated_dirac_status),
                                                            priority=5, name="Job %s Finalizing" % job.fqid)
                 job.been_queued = True

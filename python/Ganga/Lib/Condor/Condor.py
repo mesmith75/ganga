@@ -62,6 +62,7 @@ __version__ = "2.5"
 
 from Ganga.Core import Sandbox
 from Ganga.GPIDev.Adapters.IBackend import IBackend
+from Ganga.GPIDev.Base.Proxy import stripProxy
 from Ganga.GPIDev.Lib.File.FileBuffer import FileBuffer
 from Ganga.GPIDev.Schema import ComponentItem, Schema, SimpleItem, Version
 from Ganga.Utility.ColourText import Foreground, Effects
@@ -95,7 +96,7 @@ class Condor(IBackend):
                              doc='Flag to pass current envrionment to execution host'),
         "rank": SimpleItem(defvalue="Memory",
                            doc="Ranking scheme to be used when selecting execution host"),
-        "submit_options": SimpleItem(defvalue=[], typelist=["str"],
+        "submit_options": SimpleItem(defvalue=[], typelist=[str],
                                      sequence=1, doc="Options passed to Condor at submission time"),
         "id": SimpleItem(defvalue="", protected=1, copyable=0,
                          doc="Condor jobid"),
@@ -112,7 +113,8 @@ class Condor(IBackend):
         "globusscheduler": SimpleItem(defvalue="", doc="Globus scheduler to be used (required for Condor-G submission)"),
         "globus_rsl": SimpleItem(defvalue="",
                                  doc="Globus RSL settings (for Condor-G submission)"),
-
+        "accounting_group": SimpleItem(defvalue='', doc="Provide an accounting group for this job."),
+        "cdf_options": SimpleItem(defvalue={}, doc="Additional options to set in the CDF file given by a dictionary")
     })
 
     _category = "backends"
@@ -300,12 +302,14 @@ class Condor(IBackend):
             "",
             "import os",
             "import time",
+            "import mimetypes",
             "",
             "startTime = time.strftime"
             + "( '%a %d %b %H:%M:%S %Y', time.gmtime( time.time() ) )",
             "",
             "for inFile in %s:" % str(fileList),
-            "   getPackedInputSandbox( inFile )",
+            "   if mimetypes.guess_type(inFile)[1] in ['gzip', 'bzip2']:",
+            "       getPackedInputSandbox( inFile )",
             "",
             "exePath = '%s'" % exeString,
             "if os.path.isfile( '%s' ):" % os.path.basename(exeString),
@@ -362,6 +366,13 @@ class Condor(IBackend):
                 'stream_error': 'false',
                 'getenv': self.getenv
             }
+
+        # extend with additional cdf options
+        cdfDict.update(self.cdf_options)
+
+        # accounting group
+        if self.accounting_group:
+            cdfDict['accounting_group'] = self.accounting_group
 
         envList = []
         if self.env:
@@ -566,8 +577,4 @@ class Condor(IBackend):
 
 #_________________________________________________________________________
 
-from Ganga.Utility.Config import makeConfig
-config = makeConfig('Condor', 'Settings for Condor Batch system')
 
-config.addOption('query_global_queues', True,
-                 "Query global condor queues, i.e. use '-global' flag")

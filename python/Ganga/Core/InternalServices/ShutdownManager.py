@@ -40,6 +40,8 @@ Extend the behaviour of the default *atexit* module to support:
 
 import atexit
 
+from Ganga.Utility import stacktracer
+
 
 def _ganga_run_exitfuncs():
     """run any registered exit functions
@@ -53,6 +55,8 @@ def _ganga_run_exitfuncs():
     the registered handlers are executed
     """
 
+    from Ganga.GPIDev.Base.Proxy import getName
+
     #print("Shutting Down Ganga Repositories")
     from Ganga.Runtime import Repository_runtime
     Repository_runtime.flush_all()
@@ -64,25 +68,14 @@ def _ganga_run_exitfuncs():
     from Ganga.Utility.Config import setConfigOption
     setConfigOption('Configuration', 'DiskIOTimeout', 1)
 
-    try:
-        from Ganga.GPI import queues
-        queues.lock()
-    except Exception as err:
-        logger.debug("This should only happen if Ganga filed to initialize correctly")
-        logger.debug("Err: %s" % str(err))
-
     ## Stop the Mon loop from iterating further!
     from Ganga.Core import monitoring_component
     if monitoring_component is not None:
         from Ganga.Core.MonitoringComponent.Local_GangaMC_Service import getStackTrace
         getStackTrace()
         monitoring_component.disableMonitoring()
-        #monitoring_component.stop()
-
-    ## This will stop the Registries flat but we may still have threads processing data!
-    #from Ganga.Core.InternalServices import Coordinator
-    #if Coordinator.servicesEnabled:
-    #    Coordinator.disableInternalServices( shutdown = True )
+        monitoring_component.stop()
+        monitoring_component.join()
 
     ## Stop the tasks system from running it's GangaThread before we get to the GangaThread shutdown section!
     from Ganga.GPIDev.Lib.Tasks import stopTasks
@@ -95,13 +88,6 @@ def _ganga_run_exitfuncs():
     from Ganga.Core.MonitoringComponent.Local_GangaMC_Service import _purge_actions_queue, stop_and_free_thread_pool
     _purge_actions_queue()
     stop_and_free_thread_pool()
-
-    try:
-        from Ganga.GPI import queues
-        queues._purge_all()
-    except Exception as err:
-        logger.debug("This should only happen if Ganga filed to initialize correctly")
-        logger.debug("Err2: %s" % str(err))
 
     def priority_cmp(f1, f2):
         """
@@ -130,7 +116,11 @@ def _ganga_run_exitfuncs():
     atexit._exithandlers = map(add_priority, atexit._exithandlers)
     atexit._exithandlers.sort(priority_cmp)
 
-    logger.info("Stopping running tasks before shutting down Repositories")
+    logger.info("Stopping Job processing before shutting down Repositories")
+
+    from Ganga.Core.GangaThread.WorkerThreads import _global_queues
+    if _global_queues:
+        _global_queues.freeze()
 
     import inspect
     while atexit._exithandlers:
@@ -139,11 +129,11 @@ def _ganga_run_exitfuncs():
         try:
             if hasattr(func, 'im_class'):
                 for cls in inspect.getmro(func.__self__.__class__):
-                    if func.__name__ in cls.__dict__:
-                        logger.debug(cls.__name__ + " : " + func.__name__)
+                    if getName(func) in cls.__dict__:
+                        logger.debug(getName(cls) + " : " + getName(func))
                 func(*targs, **kargs)
             else:
-                logger.debug("noclass : " + func.__name__)
+                logger.debug("noclass : " + getName(func))
                 #print("%s" % str(func))
                 #print("%s" % str(inspect.getsourcefile(func)))
                 #func(*targs, **kargs)
@@ -151,7 +141,7 @@ def _ganga_run_exitfuncs():
                 if str(inspect.getsourcefile(func)).find('Ganga') != -1:
                     func(*targs, **kargs)
         except Exception as err:
-            s = 'Cannot run one of the exit handlers: %s ... Cause: %s' % (func.__name__, str(err))
+            s = 'Cannot run one of the exit handlers: %s ... Cause: %s' % (getName(func), str(err))
             logger.debug(s)
             try:
                 import os
@@ -159,6 +149,9 @@ def _ganga_run_exitfuncs():
                 logger.debug("\n%s" % inspect.getsource(func))
             except Exception as err2:
                 logger.debug("Error getting source code and failure reason: %s" % str(err2))
+
+    from Ganga.Core.GangaThread.WorkerThreads import shutDownQueues
+    shutDownQueues()
 
     logger.info("Shutting Down Ganga Repositories")
     from Ganga.Runtime import Repository_runtime
@@ -171,9 +164,12 @@ def _ganga_run_exitfuncs():
     removeGlobalSessionFileHandlers()
     removeGlobalSessionFiles()
 
-    import Ganga.Utility.logging
-    if Ganga.Utility.logging.requires_shutdown is True:
-        Ganga.Utility.logging.final_shutdown()
+    if stacktracer._tracer:
+        stacktracer.trace_stop()
+
+    from Ganga.Utility.logging import requires_shutdown, final_shutdown
+    if requires_shutdown is True:
+        final_shutdown()
 
     from Ganga.Runtime import bootstrap
     if bootstrap.DEBUGFILES or bootstrap.MONITOR_FILES:

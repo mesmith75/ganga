@@ -17,24 +17,6 @@ from .RegistrySliceProxy import RegistrySliceProxy, _wrap, _unwrap
 import Ganga.Utility.logging
 logger = Ganga.Utility.logging.getLogger()
 
-# add display default values for the box
-config.addOption('box_columns',
-                 ("id", "type", "name", "application"),
-                 'list of job attributes to be printed in separate columns')
-
-config.addOption('box_columns_width',
-                 {'id': 5, 'type': 20, 'name': 40, 'application': 15},
-                 'width of each column')
-
-config.addOption('box_columns_functions',
-                 {'application': "lambda obj: obj.application._name"},
-                 'optional converter functions')
-
-config.addOption('box_columns_show_empty',
-                 ['id'],
-                 'with exception of columns mentioned here, hide all values which evaluate to logical false (so 0,"",[],...)')
-
-
 class BoxTypeError(GangaException, TypeError):
 
     def __init__(self, what=''):
@@ -48,7 +30,7 @@ class BoxMetadataObject(GangaObject):
 
     """Internal object to store names"""
     _schema = Schema(Version(1, 0), {"name": SimpleItem(
-        defvalue="", copyable=1, doc='the name of this object', typelist=["str"])})
+        defvalue="", copyable=1, doc='the name of this object', typelist=[str])})
     _name = "BoxMetadataObject"
     _category = "internal"
     _enable_plugin = True
@@ -60,6 +42,12 @@ class BoxRegistry(Registry):
     def __init__(self, name, doc, dirty_flush_counter=10, update_index_time=30, dirty_max_timeout=60, dirty_min_timeout=30):
         super(BoxRegistry, self).__init__(name, doc, dirty_flush_counter, update_index_time, dirty_max_timeout, dirty_min_timeout)
 
+        self.stored_slice = BoxRegistrySlice(self.name)
+        self.stored_slice.objects = self
+        self.stored_proxy = BoxRegistrySliceProxy(self.stored_slice)
+        self.stored_proxy.add = self.proxy_add
+        self.stored_proxy.rename = self.proxy_rename
+        self.stored_proxy.remove = self.proxy_remove
 
     def _setName(self, obj, name):
         nobj = self.metadata[self.find(obj)]
@@ -83,8 +71,10 @@ class BoxRegistry(Registry):
         cached_values = ['status', 'id', 'name']
         c = {}
         for cv in cached_values:
-            if cv in obj.getNodeData():
-                c[cv] = obj.getNodeAttribute(cv)
+            try:
+                c[cv] = getattr(obj, cv)
+            except AttributeError as err:
+                c[cv] = None
         slice = BoxRegistrySlice("tmp")
         for dpv in slice._display_columns:
             c["display:" + dpv] = slice._get_display_value(obj, dpv)
@@ -168,14 +158,11 @@ class BoxRegistry(Registry):
 
         self._remove(self._get_obj(obj_id))
 
+    def getSlice(self):
+        return self.stored_slice
+
     def getProxy(self):
-        slice = BoxRegistrySlice(self.name)
-        slice.objects = self
-        proxy = BoxRegistrySliceProxy(slice)
-        proxy.add = self.proxy_add
-        proxy.rename = self.proxy_rename
-        proxy.remove = self.proxy_remove
-        return proxy
+        return self.stored_proxy
 
     def startup(self):
         self._needs_metadata = True
@@ -186,11 +173,9 @@ class BoxRegistrySlice(RegistrySlice):
 
     def __init__(self, name):
         super(BoxRegistrySlice, self).__init__(name, display_prefix="box")
-        self._display_columns_functions[
-            "id"] = lambda obj: obj._getRegistry().find(obj)
+        self._display_columns_functions["id"] = lambda obj: obj._getRegistry().find(obj)
         self._display_columns_functions["type"] = lambda obj: obj._name
-        self._display_columns_functions[
-            "name"] = lambda obj: obj._getRegistry()._getName(obj)
+        self._display_columns_functions["name"] = lambda obj: obj._getRegistry()._getName(obj)
         from Ganga.Utility.ColourText import Foreground, Background, Effects
         fg = Foreground()
         fx = Effects()
@@ -202,8 +187,11 @@ class BoxRegistrySlice(RegistrySlice):
                                'jobs': fg.blue}
         self._proxyClass = BoxRegistrySliceProxy
 
-    def _getColour(self, obj):
-        return self.status_colours.get(obj._category, self.fx.normal)
+    def _getColour(self, _obj):
+        try:
+            return self.status_colours.get(stripProxy(_obj)._category, self.fx.normal)
+        except AttributeError as err:
+            return self.status_colours['default']
 
     def __getitem__(self, id):
         if isinstance(id, str):

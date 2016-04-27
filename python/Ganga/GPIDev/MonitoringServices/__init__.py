@@ -6,24 +6,12 @@ from Ganga.Core.exceptions import GangaException
 from Ganga.GPIDev.Adapters.IMonitoringService import IMonitoringService
 from Ganga.GPIDev.MonitoringServices.Composite import CompositeMonitoringService
 
-from Ganga.Utility.Config import makeConfig
+from Ganga.Utility.Config import getConfig
 
 from Ganga.Utility.logging import getLogger
 logger = getLogger()
 
-c = makeConfig('MonitoringServices', """External monitoring systems are used
-to follow the submission and execution of jobs. Each entry in this section
-defines a monitoring plugin used for a particular combination of application
-and backend. Asterisks may be used to specify any application or any
-backend. The configuration entry syntax:
-
-ApplicationName/BackendName = dot.path.to.monitoring.plugin.class.
-
-Example: DummyMS plugin will be used to track executables run on all backends:
-
-Executable/* = Ganga.Lib.MonitoringServices.DummyMS.DummyMS
-
-""", is_open=True)
+c = getConfig('MonitoringServices')
 
 
 class MonitoringServiceError(GangaException):
@@ -66,7 +54,7 @@ def getMonitoringClass(mclassname):
             logger.debug("ImportError: %s" % str(err))
             raise MonitoringServiceError('%s while loading %s' % (str(err), mclassname))
         except KeyError as err:
-            logging.debug("KeyError %s" % str(err))
+            logger.debug("KeyError %s" % str(err))
             raise MonitoringServiceError('class %s not found while loading %s' % (classname, mclassname))
 
 
@@ -99,8 +87,9 @@ def findMonitoringClassesName(job):
     #  - Application/*
     #  - */Backend
     #  - */*
-    applicationName = job.application._name
-    backendName = job.backend._name
+    from Ganga.GPIDev.Base.Proxy import getName
+    applicationName = getName(job.application)
+    backendName = getName(job.backend)
 
     allclasses = []
     for configParam in [applicationName + '/' + backendName,
@@ -134,7 +123,7 @@ def getMonitoringObject(job):
         except MonitoringServiceError as err:
             logger.debug("Error with: %s" % str(err))
             this_class = None
-        if thisclass is not None:
+        if this_class is not None:
             monClasses.append(this_class)
     jobs = [job] * len(monClasses)
     configs = [monClass.getConfig() for monClass in monClasses]

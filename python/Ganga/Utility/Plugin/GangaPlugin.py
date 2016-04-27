@@ -1,11 +1,12 @@
-import Ganga.Utility.logging
+from Ganga.Utility.logging import getLogger
 from Ganga.Core.exceptions import GangaValueError
-logger = Ganga.Utility.logging.getLogger()
+logger = getLogger()
 
 
 class PluginManagerError(GangaValueError):
 
-    def __init__(self, x): ValueError.__init__(self, x)
+    def __init__(self, x):
+        super(PluginManagerError, self).__init__(self, x)
 
 # Simple Ganga Plugin Mechanism
 #
