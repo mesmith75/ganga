@@ -21,6 +21,31 @@ def _setupGangaPath():
 
         print("Adding: %s to Python Path\n" % ganga_python_dir)
 
+
+def load_config_files():
+    """
+    Load the config files as a normal Ganga session would, taking
+    into account environment variables etc.
+    """
+    from Ganga.Utility.Config import getConfig, setSessionValuesFromFiles
+    from Ganga.Runtime import GangaProgram
+    system_vars = {}
+    for opt in getConfig('System'):
+        system_vars[opt] = getConfig('System')[opt]
+    config_files = GangaProgram.get_config_files(os.path.expanduser('~/.gangarc'))
+    setSessionValuesFromFiles(config_files, system_vars)
+
+
+def clear_config():
+    """
+    Reset all the configs back to their default values
+    """
+    from Ganga.Utility.Config import allConfigs
+    for package in allConfigs.values():
+        package._user_handlers = []
+        package._session_handlers = []
+        package.revertToDefaultOptions()
+
 _setupGangaPath()
 
 def start_ganga(gangadir_for_test, extra_opts=[]):
@@ -82,8 +107,11 @@ def start_ganga(gangadir_for_test, extra_opts=[]):
         logger.info("Initializing")
         Ganga.Runtime._prog.initEnvironment()
     else:
-        from Ganga.Runtime.Repository_runtime import startUpRegistries
+        # Load the config from the appropriate files
+        load_config_files()
+
         from Ganga.Utility.Config import getConfig
+        from Ganga.Runtime.Repository_runtime import startUpRegistries
         if getConfig('Configuration')['AutoStartReg']:
             startUpRegistries()
 
@@ -186,9 +214,7 @@ def stop_ganga():
     ShutdownManager._ganga_run_exitfuncs()
 
     # Undo any manual editing of the config and revert to defaults
-    from Ganga.Utility.Config import allConfigs
-    for package in allConfigs.values():
-        package.revertToDefaultOptions()
+    clear_config()
 
     # Finished
     logger.info("Test Finished")
