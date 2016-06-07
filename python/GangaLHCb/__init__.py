@@ -101,7 +101,7 @@ def _store_dirac_environment():
 
 if not _after_bootstrap:
     _store_dirac_environment()
-    configDirac.setSessionValue('DiracEnvJSON', os.environ['GANGADIRACENVIRONMENT'])
+    configDirac.overrideDefaultValue('DiracEnvJSON', os.environ['GANGADIRACENVIRONMENT'])
 
     _store_root_version()
 
